@@ -1,62 +1,3 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Device Manager · 设备管理</title>
-<style>
-:root{color-scheme:light;font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#172536;background:#f4f6f9}*{box-sizing:border-box}body{margin:0}header{background:#14263d;color:white;padding:25px max(24px,calc((100% - 1120px)/2))}header span{font-size:12px;letter-spacing:2px;color:#b6c7dc}h1{font-size:27px;margin:4px 0}header p{margin:0;color:#c8d4e3}main{max-width:1168px;margin:28px auto;padding:0 24px 50px}h2{font-size:18px;margin:0 0 8px}p{margin:6px 0 16px}.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:20px}.card{background:#fff;border:1px solid #dce3eb;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 3px 12px #15263b05}.muted{color:#64748b}.current{font-size:32px;line-height:1.3;margin:14px 0 8px}.badge{display:inline-block;border-radius:20px;padding:3px 10px;font-size:12px;background:#e6edf7;color:#274d7a}.green{background:#e3f5ed;color:#146542}.upload-area{border:1px dashed #9aabc0;border-radius:8px;padding:20px;background:#fafbfd;margin:18px 0}input[type=file]{display:block;width:100%;margin-top:12px;font:inherit;font-size:13px}button{border:0;border-radius:7px;background:#1d5db7;color:#fff;padding:9px 16px;cursor:pointer;font:inherit;font-weight:600}button:hover{background:#184d97}button:disabled{opacity:.5;cursor:default}.secondary{background:#edf1f6;color:#33455d}.secondary:hover{background:#dfe6ef}.row{display:flex;align-items:center;justify-content:space-between;gap:16px}.step{color:#44618a;font-size:12px;font-weight:700;letter-spacing:1px;margin-bottom:6px}progress{width:100%;height:9px;margin-top:16px;accent-color:#1d5db7}.notice{border-radius:8px;padding:12px 16px;margin-bottom:20px;background:#e4f4ec;color:#145638;white-space:pre-wrap}.notice.error{background:#fff0ef;color:#9f2921}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid #e6ebf1}th{font-size:12px;color:#64748b}td small{display:block;color:#64748b}.empty{padding:24px 0;color:#64748b;text-align:center}code{font:13px ui-monospace,monospace}footer{color:#64748b;font-size:13px}#file-info{overflow-wrap:anywhere;font-size:13px}button:focus-visible,input:focus-visible{outline:3px solid #7ba9ec;outline-offset:3px}[hidden]{display:none!important}@media(max-width:760px){.grid{grid-template-columns:1fr;gap:0}.card{padding:18px}main{padding:0 14px 30px}.row{align-items:flex-start}h1{font-size:24px}}
-.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}.tabs button{background:#e6edf7;color:#274d7a}.tabs button[aria-selected=true]{background:#1d5db7;color:white}a.download{display:inline-block;margin:6px 10px 6px 0;color:#1d5db7}#firmware-detail{max-width:1120px;margin:auto}#current-details{overflow-wrap:anywhere}.upload-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:28px}.upload-main,.upload-sidebar{min-width:0}.upload-sidebar{border-left:1px solid #e6ebf1;padding-left:28px}.upload-sidebar .current{font-size:25px}.upload-sidebar .row{align-items:flex-start}.upload-sidebar .row button{padding:5px 10px;font-size:13px}#drafts td:last-child button{margin-right:10px}#drafts .download{font-size:13px}main{max-width:1400px}@media(max-width:760px){.upload-layout{grid-template-columns:minmax(0,1fr);gap:18px}.upload-sidebar{border-left:0;border-top:1px solid #e6ebf1;padding:18px 0 0}}
-.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.toolbar input{padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;min-width:0;flex:1}.toolbar label{font-size:14px}.publishing,.publishing:disabled{background:#e5e7eb;color:#4b5563;opacity:1;cursor:default}.invalid,.invalid:disabled{background:#b42318;color:white;opacity:1;cursor:not-allowed}.network-info{white-space:normal;overflow-wrap:anywhere;max-width:480px}td button{margin-right:10px}.filter-count{font-size:13px;color:#64748b}a{color:#1d5db7}
-.module-sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:#14263d;color:#dce6f3;padding:28px 16px}.brand{font-size:21px;font-weight:700;color:white}.module-sidebar p{color:#9eb3cc}.module-sidebar nav{display:grid;gap:8px;margin-top:28px}.module-sidebar a{padding:12px;border-radius:8px;text-decoration:none;color:#c8d4e3}.module-sidebar a[aria-current=page]{background:#294563;color:white}.workspace{margin-left:220px}header{padding:26px 32px;background:white;color:#172536;border-bottom:1px solid #dce3eb}header p,header span{color:#64748b}@media(max-width:760px){.module-sidebar{position:static;width:auto;padding:14px}.module-sidebar nav{display:flex;margin-top:8px}.module-sidebar p{display:none}.workspace{margin-left:0}header{padding:20px}}
-</style>
-</head>
-<body>
-<aside class="module-sidebar"><div class="brand">Device Manager</div><p>设备管理</p><nav aria-label="功能模块"><a id="module-ota" href="/#manage" aria-current="page">OTA 固件管理</a><a id="module-sol" href="/#sol">SOL 远程控制台</a></nav></aside>
-<div class="workspace"><header><span>DEVICE MANAGER</span><h1 id="module-title">OTA 固件管理</h1><p id="module-description">上传固件包，发布版本，追踪设备升级结果。</p></header>
-<main>
-<section id="sol-panel" class="card" hidden>
-<h2>SOL 启动日志</h2><p class="muted">只读实时日志与历史回放。设备网络恢复后补传已采集的启动日志；不提供远程命令输入。</p>
-<div id="sol-auth" class="toolbar" hidden><label for="sol-key">查看凭据</label><input id="sol-key" type="password" autocomplete="off" placeholder="输入服务端 sol-keys/viewer 中的凭据"><button id="sol-connect">连接</button><button id="sol-disconnect" class="secondary">断开</button></div>
-<div id="sol-status" role="status">未连接</div>
-<div class="toolbar"><label for="sol-device">设备</label><select id="sol-device"></select><label for="sol-boot">启动记录</label><select id="sol-boot"></select><label for="sol-stage">阶段</label><select id="sol-stage"><option value="all">全部</option><option>r5-spl</option><option>a53-spl</option><option>uboot</option><option>initramfs</option><option>kernel</option><option>services</option><option>events</option></select><button id="sol-refresh" class="secondary">刷新</button><button id="sol-export" class="secondary">导出当前视图</button></div>
-<pre id="sol-meta" class="muted"></pre><p class="muted">服务端保留每台设备最近 4 次启动，最多 2048 个日志块（约 8 MiB）。本地容量耗尽前未上传的数据可能丢失。视图保留最近 2 MiB 正文，保留原始缩进和换行；跨来源顺序按日志时间尽力还原。</p>
-<div class="toolbar"><label for="sol-filter">筛选</label><input id="sol-filter" type="search" placeholder="筛选日志文本"><label><input id="sol-live" type="checkbox" checked> 实时跟随</label></div>
-<pre id="sol-output" tabindex="0" aria-label="设备日志" style="background:#101c2c;color:#d6e4f5;padding:18px;border-radius:8px;max-height:65vh;overflow:auto;white-space:pre;overflow-wrap:normal;tab-size:8"></pre>
-</section>
-<div id="notice" class="notice" role="status" hidden></div>
-<section id="firmware-detail" class="card" hidden></section>
-<div id="overview">
-<div class="tabs" role="tablist" aria-label="固件管理"><button type="button" role="tab" id="tab-manage" aria-controls="panel-manage" aria-selected="true" tabindex="0" data-tab="manage">上传与发布</button><button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1" data-tab="history">升级历史</button><button type="button" role="tab" id="tab-releases" aria-controls="panel-releases" aria-selected="false" tabindex="-1" data-tab="releases">发布记录</button><button type="button" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="false" tabindex="-1" data-tab="audit">异常审计</button></div>
-<div role="tabpanel" id="panel-manage" aria-labelledby="tab-manage">
-<section class="card"><div class="upload-layout"><div class="upload-main"><h2>上传固件</h2>
-<p class="muted">上传后先保存为待发布版本，设备不会立即下载。</p>
-<form id="upload-form">
-<div class="upload-area"><label for="firmware"><strong>选择固件包（.tar.gz）</strong></label>
-<div class="muted">包含 release.itb、kernel.itb 和 rootfs.itb，最大 512 MiB。</div>
-<input id="firmware" type="file" accept=".tar.gz,.tgz" required>
-<div id="file-info" class="muted"></div></div>
-<button id="upload-button" type="submit" disabled>上传并校验</button>
-<progress id="progress" max="100" value="0" hidden aria-label="上传进度"></progress>
-<p id="upload-status" class="muted" aria-live="polite"></p>
-</form></div><aside class="upload-sidebar"><div class="row"><div class="step">设备当前可获取的版本</div><button id="refresh" class="secondary" type="button">刷新</button></div>
-<div id="current-version" class="current">加载中…</div>
-<div id="current-details" class="muted"></div>
-<p class="muted" style="margin-top:18px">设备会检查已发布版本，完成升级并通过健康检查后上报结果。</p>
-</aside></div></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
-<div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
-<div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
-</section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>
-<div id="releases-empty" class="empty" hidden>尚未发布版本。</div>
-<div class="table-wrap"><table id="releases-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="releases"></tbody></table></div>
-</section><section class="card" role="tabpanel" id="panel-history" aria-labelledby="tab-history" hidden><h2>设备升级历史</h2>
-<p class="muted">保留每次升级及各阶段上报记录。只有重启后通过健康检查，才显示升级成功。</p>
-<div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>设备</th><th>结果</th><th>最近上报</th><th>详情 / 网络审计</th></tr></thead><tbody id="devices"></tbody></table></div>
-</section><section class="card" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit" hidden><h2>固件异常与回退审计</h2><p class="muted">异常固件全局停发；存在健康检查成功的历史版本时自动回退发布。保留设备、原因、固件哈希和处理动作。</p><div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>时间</th><th>设备</th><th>分类 / 原因</th><th>处理动作 / 详情</th></tr></thead><tbody id="audit"></tbody></table></div></section>
-<footer>设备会自动下载已发布版本。上传但未发布的固件对设备不可见。</footer>
-</div>
-</main></div>
-<script>
 'use strict';
 const $ = id => document.getElementById(id);
 let busy = false;
@@ -83,6 +24,8 @@ function state(){
 async function loadState(){
  const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw new Error('无法读取版本列表，请检查服务日志。');
  const data=await response.json();
+ renderFleet(data);
+ $('service-health').textContent='管理服务已连接';$('service-health').classList.remove('error');
  if(location.pathname==='/firmware'){renderDetails(data);return;}
  const current=data.releases.find(r=>r.publication===data.latest);
  $('current-version').textContent=current?(current.tag||current.firmware_version):'尚未发布';
@@ -201,14 +144,14 @@ for(const [tab,list] of Object.entries(lists)){
  const empty=document.createElement('p');empty.id='empty-'+tab;empty.className='empty';empty.textContent='暂无记录或没有符合筛选条件的记录。';empty.hidden=true;wrap.after(empty);
 }
 
-/* SOL_CONSOLE */
+
 const sol={active:false,token:'',rows:[],text:'',cursor:0,generation:0,busy:false,console:new SolConsole()};
 function solDecode(text){return new TextDecoder().decode(Uint8Array.from(text,c=>c.charCodeAt(0)));}
 async function solGet(path){const r=await fetch(path,{cache:'no-store',headers:sol.token?{Authorization:'Bearer '+sol.token}:{}});const body=await r.json();if(!r.ok)throw Error(body.error||'日志请求失败');return body;}
 function solRender(){const query=$('sol-filter').value.toLowerCase();$('sol-output').textContent=query?sol.text.split('\n').filter(line=>line.toLowerCase().includes(query)).join('\n'):sol.text;if($('sol-live').checked)$('sol-output').scrollTop=$('sol-output').scrollHeight;}
 function solReset(){sol.generation++;sol.cursor=0;sol.text='';sol.console=new SolConsole();solRender();}
 function solBoots(follow=false){const old=$('sol-boot').value;$('sol-boot').replaceChildren();for(const row of sol.rows.filter(r=>r.device===$('sol-device').value)){const o=document.createElement('option');o.value=row.boot;o.textContent=row.boot+(solDecode(row.meta).includes('current=yes')?'（当前）':'');$('sol-boot').append(o);}if(!follow&&[...$('sol-boot').options].some(o=>o.value===old))$('sol-boot').value=old;solReset();}
-async function solIndex(rows=null,follow=false){if(!rows)rows=await solGet('/api/sol/devices');sol.rows=rows;const old=$('sol-device').value;$('sol-device').replaceChildren();for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;solBoots(follow);if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';}
+async function solIndex(rows=null,follow=false){if(!rows)rows=await solGet('/api/sol/devices');sol.rows=rows;const old=$('sol-device').value;$('sol-device').replaceChildren();for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;solBoots(follow);if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';refreshFleetFromSol();}
 async function solPoll(){
  if(sol.busy||!sol.active||location.hash!=='#sol'||!$('sol-live').checked)return;
  const device=$('sol-device').value,boot=$('sol-boot').value;if(!device||!boot)return;
@@ -230,16 +173,18 @@ setInterval(solPoll,2000);
 setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await solGet('/api/sol/devices');const signature=a=>a.map(r=>r.device+'/'+r.boot).join('|');const selected=sol.rows.find(r=>r.device===$('sol-device').value&&r.boot===$('sol-boot').value);const follow=$('sol-live').checked&&!!selected&&solDecode(selected.meta).includes('current=yes');if(signature(rows)!==signature(sol.rows))await solIndex(rows,follow);else sol.rows=rows;}catch{}},10000);
 
 function restoreTab(){
- const sol=location.pathname!=='/firmware'&&location.hash==='#sol';
- $('sol-panel').hidden=!sol;$('overview').hidden=sol||location.pathname==='/firmware';
- $('module-title').textContent=sol?'SOL 远程控制台':'OTA 固件管理';
- $('module-description').textContent=sol?'实时日志与历史回放':'上传固件包，发布版本，追踪设备升级结果。';
- $('module-ota').setAttribute('aria-current',sol?'false':'page');$('module-sol').setAttribute('aria-current',sol?'page':'false');
+ const detail=location.pathname==='/firmware';
+ const route=detail?'firmware':location.hash.slice(1)||'dashboard';
+ const dashboard=route==='dashboard',devices=route==='devices',sol=route==='sol',audit=route==='audit';
+ $('dashboard-panel').hidden=!dashboard||detail;$('devices-panel').hidden=!devices||detail;
+ $('sol-panel').hidden=!sol||detail;$('overview').hidden=dashboard||devices||sol||detail;
+ const pages={dashboard:['总览','设备状态、固件发布与最近事件。'],devices:['设备','固件身份、网络信息与升级结果。'],sol:['远程日志 SOL','只读启动日志与历史回放。'],audit:['事件与审计','固件异常、升级失败和自动回退。']};
+ const [title,description]=pages[route]||['固件 OTA','上传固件、发布版本并追踪升级结果。'];
+ $('module-title').textContent=detail?'固件详情':title;$('module-description').textContent=detail?'版本内容、下载量与设备升级统计。':description;
+ for(const id of ['dashboard','devices','ota','sol','audit'])$('module-'+id).setAttribute('aria-current',(!detail&&((id===route)||(id==='ota'&&!pages[route])))||(detail&&id==='ota')?'page':'false');
  selectTab(tabs.find(t=>t.dataset.tab===location.hash.slice(1))||tabs[0],false);
 }
 window.addEventListener('hashchange',restoreTab);restoreTab();
 document.querySelectorAll('[data-refresh],#refresh').forEach(b=>b.onclick=()=>state().catch(e=>notice(e.message,true)));
-state().catch(e=>notice(e.message,true));
-</script>
-</body>
-</html>
+$('header-refresh').onclick=()=>state().catch(e=>notice(e.message,true));
+state().catch(e=>{notice(e.message,true);$('service-health').textContent='管理服务不可用';$('service-health').classList.add('error');});

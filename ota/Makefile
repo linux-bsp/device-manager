@@ -5,8 +5,8 @@ CFLAGS += -std=c11 -Wall -Wextra -Werror
 .PHONY: all test clean
 all: device-server fwctld ota-cli
 
-ota-page.h: admin.html sol-console.js embed-page.awk
-	awk '/^\/\* SOL_CONSOLE \*\// { while ((getline line < "sol-console.js") > 0) print line; next } { print }' admin.html | od -An -v -t u1 | awk -f embed-page.awk > $@
+ota-page.h: web/index.html web/styles.css web/app.js web/fleet.js web/sol-console.js web/embed.py
+	python3 web/embed.py $@
 
 device-server: sol.c sol.h ota-catalog.c device-server.c ota-quarantine.c ota-identity.c ota-admin.c ota-admin.h ota-publish.c ota-common.c ota-common.h ota-device.c ota-history.c ota-report.c ota-device.h ota-page.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) sol.c ota-catalog.c device-server.c ota-quarantine.c ota-identity.c ota-admin.c ota-publish.c ota-common.c ota-device.c ota-history.c ota-report.c $(LDFLAGS) -lz -lsqlite3 -o $@

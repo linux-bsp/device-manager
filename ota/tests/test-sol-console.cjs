@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const SolConsole = require('../sol-console.js');
+const SolConsole = require('../web/sol-console.js');
 const bytes = text => Buffer.from(text).toString('latin1');
 const frame = (seq, time, data) => `[seq=${seq} mono=${time.toFixed(9)} wall=0 bytes=${data.length} source=console] ${data}`;
 function push(view, stage, text, chunk = 4096, gen = 1, start = 0) {

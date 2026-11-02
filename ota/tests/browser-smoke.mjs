@@ -72,6 +72,15 @@ try {
     }
     await rpc('Page.navigate',{url});
     await until(()=>evaluate("document.querySelector('#current-version')?.textContent !== '加载中…' && !!document.querySelector('#firmware')"),'page state');
+    assert(await evaluate("!document.querySelector('#dashboard-panel').hidden && document.querySelector('#metric-devices').textContent==='1' && document.querySelector('#metric-success').textContent==='1'"),'Dashboard summary');
+    await screenshot('dashboard-desktop.png');
+    await evaluate("document.querySelector('#module-devices').click()");
+    await until(()=>evaluate("!document.querySelector('#devices-panel').hidden && document.querySelectorAll('#device-list tr').length===1"),'Device list');
+    await evaluate("document.querySelector('#device-list button').click()");
+    assert(await evaluate("document.querySelector('#device-detail').textContent.includes('browser-test')"),'Device detail');
+    await screenshot('device-detail-desktop.png');
+    await evaluate("document.querySelector('#module-ota').click()");
+    await until(()=>evaluate("!document.querySelector('#overview').hidden"),'OTA module');
     await until(()=>evaluate("document.querySelector('#devices')?.textContent.includes('browser-test') && document.querySelector('#devices').textContent.includes('升级成功')"),'device result table');
     assert.equal(await evaluate("document.querySelectorAll('#devices tr').length"),2);
     await evaluate("document.querySelector('#devices details').open=true");
@@ -82,7 +91,11 @@ try {
     await rpc('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[resolve(bundle)]});
     await until(()=>evaluate("!document.querySelector('#upload-button').disabled"),'file selection');
     await evaluate("document.querySelector('#upload-button').click()");
-    await until(()=>evaluate("document.querySelector('#upload-status').textContent.includes('已保存为待发布')"),'upload and validation');
+    await until(async()=>{
+        const status=await evaluate("document.querySelector('#upload-status').textContent");
+        if(status.includes('失败'))throw new Error('Upload failed: '+status+'; '+await evaluate("document.querySelector('#notice').textContent"));
+        return status.includes('已保存为待发布');
+    },'upload and validation');
     const uploaded=await (await fetch(url+'/api/state')).json();
     assert.equal(uploaded.latest,before.latest,'Upload must not publish');
     const draft=uploaded.drafts.find(d=>!before.drafts.some(old=>old.id===d.id));
@@ -144,6 +157,9 @@ try {
     await pause(150);
     assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),'Mobile page overflows');
     await screenshot('published-mobile.png');
+    await evaluate("document.querySelector('#module-dashboard').click()");
+    assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),'Dashboard mobile page overflows');
+    await screenshot('dashboard-mobile.png');
     await rpc('Page.navigate',{url:url+'/firmware?kind=release&id='+after.latest+'&tab=releases'});
     await until(()=>evaluate("document.querySelector('#firmware-detail')?.textContent.includes('设备下载次数')"),'firmware detail');
     const detail=await evaluate("document.querySelector('#firmware-detail').textContent");
