@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `device-server` | 开发主机 | Device Manager Web、OTA 发布、设备升级记录与审计 |
 | `ota-cli` | 开发主机 | 命令行上传、发布和查询 |
-| `fwctl` | 设备 / initramfs | 固件验证、分区读写、A/B 切换与健康确认 |
+| `fwctl` | 设备 / initramfs | 固件验证、分区读写、A/B 切换、恢复与健康确认 |
 | `fwctld` | 设备 | OTA 检查、下载、调用 fwctl、上报结果 |
 | `logctl` | 设备 | 查询、实时查看及导出本地日志 |
 | `logctld` | 设备 | 内核与服务日志采集、启动日志归档、轮转 |
@@ -16,16 +16,17 @@
 - `ota/`：服务端、CLI、升级代理、共享协议及 Web 页面。
 - `firmware/`：独立固件操作引擎，不链接 EDK 库。
 - `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
+- `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
 - `logging/`：本地日志组件及集成测试。
 - `tests/`：固件事务、恢复和版本显示测试。
 
 ## 构建
 
-在配套 workspace 中，`bsp-base-external` 提供 Buildroot 包：
+在配套 workspace 中，`bsp-base-external/package/device-manager` 通过同一份包定义分别构建 host 和 target 产物。`BR2_PACKAGE_HOST_DEVICE_MANAGER_*` 控制主机工具，`BR2_PACKAGE_DEVICE_MANAGER_*` 控制设备工具：
 
 ```sh
-make -C buildroot O="$PWD/output/am625" host-device-server
-make -C buildroot O="$PWD/output/am625" fwctl fwctld logctl
+make -C buildroot O="$PWD/output/am625" host-device-manager
+make -C buildroot O="$PWD/output/am625" device-manager
 ```
 
 主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread；日志工具需要 libcurl。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。`make -C ota test` 的日志格式回归使用 Node.js 18 或更新版本。

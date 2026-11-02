@@ -95,7 +95,7 @@ export OTA_SERVER=http://192.168.10.246:8090
 
 ## 设备端
 
-下载协议兼容旧设备；自动安装需要新版 `fwctld` 和支持 `ota-status`、`ota-check` 的 `fwctl`。旧 1.0.0–1.0.2 测试固件需要先手动升级一次。AM62x defconfig 已启用 `BR2_PACKAGE_FWCTLD`，包含 curl 命令和 BusyBox SHA256。
+下载协议兼容旧设备；自动安装需要新版 `fwctld` 和支持 `ota-status`、`ota-check` 的 `fwctl`。旧 1.0.0–1.0.2 测试固件需要先手动升级一次。AM62x defconfig 已启用 `BR2_PACKAGE_DEVICE_MANAGER_FWCTLD`，包含 curl 命令和 BusyBox SHA256。
 
 ```sh
 make -C buildroot BR2_EXTERNAL=../bsp-base-external alientek_am62x_defconfig
@@ -355,7 +355,7 @@ fwctld 边读边转发 stdout/stderr，不再等安装结束后一次性打印�
 
 | 项目 | 新名称 |
 | --- | --- |
-| Buildroot 包/选择项 | `package/fwctld` / `BR2_PACKAGE_FWCTLD` |
+| Buildroot 包/选择项 | `package/device-manager` / `BR2_PACKAGE_DEVICE_MANAGER_FWCTLD` |
 | 程序 | `/usr/sbin/fwctld` |
 | 启动脚本 | `/etc/init.d/S98fwctld` |
 | 默认/持久配置 | `/etc/default/fwctld` / `/data/fwctld.conf` |
@@ -366,11 +366,11 @@ fwctld 边读边转发 stdout/stderr，不再等安装结束后一次性打印�
 `/data/fwctld.conf`，后者覆盖默认配置。管理主机 `ota-cli` 的 `OTA_SERVER` 不变。
 启动及安装脚本只处理当前配置和文件，不包含旧名称映射、迁移或清理逻辑。
 当前 AM625 构建目录中的过时包和文件已一次性清理；新构建使用
-`BR2_PACKAGE_FWCTLD`。
+`BR2_PACKAGE_DEVICE_MANAGER_FWCTLD`。
 
 ```sh
-# workspace 根目录；已有 AM625 配置已启用 BR2_PACKAGE_FWCTLD
-make -C buildroot O="$PWD/output/am625" fwctld
+# workspace 根目录；已有 AM625 配置已启用 BR2_PACKAGE_DEVICE_MANAGER_FWCTLD
+make -C buildroot O="$PWD/output/am625" device-manager
 make -C buildroot O="$PWD/output/am625" all
 
 # 设备端

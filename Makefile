@@ -2,7 +2,7 @@ CC ?= cc
 CFLAGS ?= -O2 -g
 WARN = -std=gnu11 -Wall -Wextra -Werror
 FW_SOURCES = $(wildcard firmware/src/*.c)
-FWCTL_SOURCES = $(wildcard fwctl/src/*.c) fwctl/adapter/peripheral_ipc.c
+FWCTL_SOURCES = $(wildcard fwctl/src/*.c) fwctl/adapter/peripheral_ipc.c recovery/fw-init.c
 FW_INCLUDES = -Ifirmware/include -Ifirmware/src -Ifwctl/include -Ifwctl/adapter
 .PHONY: all host device device-server ota-cli fwctld fwctl logctl logctld test clean
 all: host device

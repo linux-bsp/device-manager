@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 
-SOURCE=Path(__file__).resolve().parents[3]/'bsp-base-external/package/fwctld/S98fwctld'
+SOURCE=Path(__file__).resolve().parents[3]/'bsp-base-external/package/device-manager/S98fwctld'
 class InitScript(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='ota-init-')

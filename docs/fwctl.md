@@ -180,9 +180,9 @@ health confirmation. The agent does not invoke mark-good itself.
 
 ## initramfs 恢复接口
 
-- `fwctl recovery-status`：输出本次启动的 deployment、rootfs 槽和组件版本，格式为 `FWRECOVERY1 <deployment> <slot> <version>`。
-- `fwctl recovery-fallback`：仅在 RAM 根文件系统内运行；选择另一已确认且内核校验通过、包含恢复 ramdisk 的完整 deployment。保存后由调用者重启；没有候选时不改 metadata。
-- `fwctl recovery-restore ROOTFS_ITB PAYLOAD_BYTES PAYLOAD_SHA256`：仅供 initramfs 在 rootfs 未挂载时使用。验证包与内核绑定的准确内容，修复当前选定 rootfs 槽并读回核对，不更新 metadata 或其他分区。
+- `fwctl recovery status`：输出本次启动的 deployment、rootfs 槽和组件版本，格式为 `FWRECOVERY1 <deployment> <slot> <version>`。
+- `fwctl recovery fallback`：仅在 RAM 根文件系统内运行；选择另一已确认且内核校验通过、包含恢复 ramdisk 的完整 deployment。保存后由调用者重启；没有候选时不改 metadata。
+- `fwctl recovery restore ROOTFS_ITB PAYLOAD_BYTES PAYLOAD_SHA256`：仅供 initramfs 在 rootfs 未挂载时使用。验证包与内核绑定的准确内容，修复当前选定 rootfs 槽并读回核对，不更新 metadata 或其他分区。
 
 恢复接口不执行 `mark-good`。新升级是否健康仍由正式系统确认。底层 API 的调用者必须保证待修复 rootfs 未挂载。
 
@@ -213,7 +213,7 @@ kernel FIT 与 rootfs 有效内容，不是 EDK 的源码 Git ID。
 - initramfs 切换根文件系统时看门狗保持启用，随后由 system_manager 接管。`nowayout` 的关闭警告不等于升级失败，也不能通过关闭看门狗隐藏。
 - 网络链路建立前的 HTTP 重试不代表固件异常；链路建立后持续失败则应检查服务器连通性。
 
-`ota-status`、`ota-check`、`recovery-status` 保持机器输出协议；`identity` 仍为单行身份日志。日志仅显示哈希前 8 位，协议和完整性校验仍使用完整 SHA256。
+`ota-status`、`ota-check`、`recovery status` 保持机器输出协议；`identity` 仍为单行身份日志。日志仅显示哈希前 8 位，协议和完整性校验仍使用完整 SHA256。
 
 固件版本统一按 `(major << 16) | (minor << 8) | patch` 解码；数值 1 显示为 `0.0.1`，256 显示为 `0.1.0`。当前项目固定使用 tag `v0.0.1`，除非用户明确要求更改。内容变更以完整 SHA256 身份区分，相同 tag、不同哈希仍会升级。
 

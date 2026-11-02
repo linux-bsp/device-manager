@@ -6,18 +6,19 @@
 #include <stdio.h>
 #include <string.h>
 
+int fwctl_recovery_main(int argc, char **argv);
+
 static void usage(const char *program)
 {
 	fprintf(stderr,
 		"Usage: %s [--config path] <command>\n"
 		"Commands:\n"
-		"  init a|b\n"
+		"  init [a|b] (no argument: initramfs PID 1)\n"
+        "  recovery [status|fallback|restore|check-root|table] ...\n"
 		"  status\n"
 		"  version\n"
 		"  ota-status\n"
         "  identity [rootfs|initramfs]\n"
-        "  recovery-status | recovery-fallback\n"
-        "  recovery-restore ROOTFS_ITB PAYLOAD_BYTES PAYLOAD_SHA256 (initramfs only)\n"
         "  ota-check VERSION KERNEL_BYTES KERNEL_SHA256 ROOTFS_BYTES ROOTFS_SHA256\n"
 		"  mark-good [deployment]\n"
 		"  mark-bad deployment\n"
@@ -62,6 +63,30 @@ int main(int argc, char **argv)
 	}
 	command = argv[options.command_index];
 	command_argc = argc - options.command_index - 1;
+    if (!strcmp(command, "init") && !command_argc)
+        return fwctl_recovery_main(0, NULL);
+    if (!strcmp(command, "recovery")) {
+        if (!command_argc) { usage(argv[0]); return 2; }
+        const char *action = argv[options.command_index + 1];
+        char *args[3];
+        if (!strcmp(action, "check-root") || !strcmp(action, "table")) {
+            if (command_argc != 3) { usage(argv[0]); return 2; }
+            args[0] = (char *)action;
+            args[1] = argv[options.command_index + 2];
+            args[2] = argv[options.command_index + 3];
+            return fwctl_recovery_main(3, args);
+        }
+        if (strcmp(action, "status") && strcmp(action, "fallback") && strcmp(action, "restore")) {
+            usage(argv[0]); return 2;
+        }
+        char recovery_command[32];
+        snprintf(recovery_command, sizeof(recovery_command), "recovery-%s", action);
+        ret = fwctl_run_firmware(&options, recovery_command, command_argc - 1,
+                                 argv + options.command_index + 2);
+        if (ret) fprintf(stderr, "[fwctl] [ERROR] %s failed: %s (%d)\n",
+                         recovery_command, strerror(-ret), -ret);
+        return ret ? 1 : 0;
+    }
 	if (!strcmp(command, "health-check")) {
 		if (command_argc) {
 			usage(argv[0]);
