@@ -8,4 +8,5 @@ int sol_request(const char *root, const char *method, const char *path,
                 size_t length, char **response);
 int sol_enroll(int argc, char **argv);
 void sol_set_open_view(bool enabled);
+void sol_set_debug_no_auth(bool enabled);
 #endif

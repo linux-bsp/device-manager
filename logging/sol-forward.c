@@ -30,11 +30,13 @@ static int config(void)
 {
     const char *path=getenv("LOGCTL_SOL_CONFIG");if(!path)path="/etc/device-manager/sol.conf";
     FILE *f=fopen(path,"r");if(!f)return -1;
-    char line[P],keyfile[P]="";
+    char line[P],keyfile[P]="",auth_mode[8]="key";
+    server[0]=device[0]=key[0]=0;strcpy(interface,"eth0");
     while(fgets(line,sizeof(line),f)) {
         line[strcspn(line,"\r\n")]=0;char *eq=strchr(line,'=');if(!eq||line[0]=='#')continue;*eq++=0;
         char *dst=NULL;size_t cap=0;
-        if(!strcmp(line,"server")){dst=server;cap=sizeof(server);}
+        if(!strcmp(line,"auth")){dst=auth_mode;cap=sizeof(auth_mode);}
+        else if(!strcmp(line,"server")){dst=server;cap=sizeof(server);}
         else if(!strcmp(line,"device")){dst=device;cap=sizeof(device);}
         else if(!strcmp(line,"key-file")){dst=keyfile;cap=sizeof(keyfile);}
         else if(!strcmp(line,"interface")){dst=interface;cap=sizeof(interface);}
@@ -46,7 +48,9 @@ static int config(void)
     if((strncmp(server,"http://",7)&&strncmp(server,"https://",8))||strpbrk(server,"\r\n @?#")||!safe(interface))return -1;
     if(!*device){char p[P];snprintf(p,sizeof(p),"/sys/class/net/%s/address",interface);if(read_text(p,device,sizeof(device)))return -1;for(char *q=device;*q;q++)if(*q==':')*q='-';}
     struct stat st;
-    if(!safe(device)||!strcmp(device,"viewer")||keyfile[0]!='/'||lstat(keyfile,&st)||!S_ISREG(st.st_mode)||(st.st_mode&0077)||st.st_uid!=geteuid())return -1;
+    if(!safe(device)||!strcmp(device,"viewer"))return -1;
+    if(!strcmp(auth_mode,"none"))return 0;
+    if(strcmp(auth_mode,"key")||keyfile[0]!='/'||lstat(keyfile,&st)||!S_ISREG(st.st_mode)||(st.st_mode&0077)||st.st_uid!=geteuid())return -1;
     if(read_text(keyfile,key,sizeof(key))||strlen(key)!=64)return -1;
     for(int i=0;i<64;i++)if(!((key[i]>='0'&&key[i]<='9')||(key[i]>='a'&&key[i]<='f')))return -1;
     return 0;
@@ -65,7 +69,7 @@ static int post(const char *boot,long long order,const char *stage,long long gen
     if(k<0||k>=(int)sizeof(url))return -1;
     CURL *c=curl_easy_init();if(!c)return -1;
     snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);
-    struct curl_slist *h=NULL;h=curl_slist_append(h,auth);h=curl_slist_append(h,"Content-Type: application/octet-stream");h=curl_slist_append(h,"Expect:");
+    struct curl_slist *h=NULL;if(*key)h=curl_slist_append(h,auth);h=curl_slist_append(h,"Content-Type: application/octet-stream");h=curl_slist_append(h,"Expect:");
     struct response r={0};
     curl_easy_setopt(c,CURLOPT_URL,url);curl_easy_setopt(c,CURLOPT_HTTPHEADER,h);
     curl_easy_setopt(c,CURLOPT_POSTFIELDS,data);curl_easy_setopt(c,CURLOPT_POSTFIELDSIZE,(long)length);

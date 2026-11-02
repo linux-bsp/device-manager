@@ -581,7 +581,7 @@ static void handle_client(int client, int root)
 
 static void usage(const char *program)
 {
-    printf("Usage: %s --root RELEASE_DIR [--bind IPV4] [--port PORT] [--sol-open-view]\n"
+    printf("Usage: %s --root RELEASE_DIR [--bind IPV4] [--port PORT] [--sol-open-view | --sol-debug-no-auth]\n"
            "Defaults: --bind 127.0.0.1 --port 8090\n"
            "Open / in a browser to upload and publish firmware bundles.\n"
            "CLI publishing: device-server publish --root DIR --source RELEASE_DIR "
@@ -600,6 +600,10 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "--help")) {
             usage(argv[0]);
             return 0;
+        }
+        if (!strcmp(argv[i], "--sol-debug-no-auth")) {
+            sol_set_debug_no_auth(true);
+            continue;
         }
         if (!strcmp(argv[i], "--sol-open-view")) {
             sol_set_open_view(true);

@@ -17,7 +17,7 @@
 <main>
 <section id="sol-panel" class="card" hidden>
 <h2>SOL 启动日志</h2><p class="muted">只读实时日志与历史回放。设备网络恢复后补传已采集的启动日志；不提供远程命令输入。</p>
-<div id="sol-auth" class="toolbar"><label for="sol-key">查看凭据</label><input id="sol-key" type="password" autocomplete="off" placeholder="输入服务端 sol-keys/viewer 中的凭据"><button id="sol-connect">连接</button><button id="sol-disconnect" class="secondary">断开</button></div>
+<div id="sol-auth" class="toolbar" hidden><label for="sol-key">查看凭据</label><input id="sol-key" type="password" autocomplete="off" placeholder="输入服务端 sol-keys/viewer 中的凭据"><button id="sol-connect">连接</button><button id="sol-disconnect" class="secondary">断开</button></div>
 <div id="sol-status" role="status">未连接</div>
 <div class="toolbar"><label for="sol-device">设备</label><select id="sol-device"></select><label for="sol-boot">启动记录</label><select id="sol-boot"></select><label for="sol-stage">阶段</label><select id="sol-stage"><option value="all">全部</option><option>r5-spl</option><option>a53-spl</option><option>uboot</option><option>initramfs</option><option>kernel</option><option>services</option><option>events</option></select><button id="sol-refresh" class="secondary">刷新</button><button id="sol-export" class="secondary">导出当前视图</button></div>
 <pre id="sol-meta" class="muted"></pre><p class="muted">服务端保留每台设备最近 4 次启动，最多 2048 个日志块（约 8 MiB）。本地容量耗尽前未上传的数据可能丢失。屏幕保留最近 256 KiB；阶段时间仅供各阶段内比较。</p>
@@ -224,7 +224,7 @@ $('sol-device').onchange=()=>{solBoots();solPoll();};$('sol-boot').onchange=$('s
 $('sol-refresh').onclick=async()=>{if(!sol.active)return;try{await solIndex();await solPoll();}catch(e){$('sol-status').textContent=e.message;}};
 $('sol-filter').oninput=solRender;$('sol-live').onchange=()=>solPoll();
 $('sol-export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([$('sol-output').textContent],{type:'text/plain;charset=utf-8'}));a.download='boot-log-'+($('sol-boot').value||'empty')+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
-fetch('/api/sol/config',{cache:'no-store'}).then(r=>r.json()).then(async config=>{if(config.open_view){$('sol-auth').hidden=true;sol.active=true;$('sol-status').textContent='测试模式：免凭据查看';await solIndex();await solPoll();}}).catch(e=>{$('sol-status').textContent=e.message;});
+fetch('/api/sol/config',{cache:'no-store'}).then(r=>r.json()).then(async config=>{if(config.open_view){$('sol-auth').hidden=true;sol.active=true;$('sol-status').textContent='正在连接设备日志';await solIndex();await solPoll();}else $('sol-auth').hidden=false;}).catch(e=>{$('sol-status').textContent=e.message;});
 setInterval(solPoll,2000);
 setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await solGet('/api/sol/devices');const signature=a=>a.map(r=>r.device+'/'+r.boot).join('|');const selected=sol.rows.find(r=>r.device===$('sol-device').value&&r.boot===$('sol-boot').value);const follow=$('sol-live').checked&&!!selected&&solDecode(selected.meta).includes('current=yes');if(signature(rows)!==signature(sol.rows))await solIndex(rows,follow);else sol.rows=rows;}catch{}},10000);
 

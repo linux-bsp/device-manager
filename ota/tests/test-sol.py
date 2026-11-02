@@ -23,8 +23,8 @@ class SOL(unittest.TestCase):
         self.start()
     def enroll(self,device):
         subprocess.run([str(ROOT/'device-server'),'sol-enroll','--root',str(self.feed),'--device',device],check=True,stdout=subprocess.DEVNULL)
-    def start(self,open_view=False):
-        self.process=subprocess.Popen([str(ROOT/'device-server'),'--root',str(self.feed),'--port','0',*(['--sol-open-view'] if open_view else [])],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    def start(self,open_view=False,no_auth=False):
+        self.process=subprocess.Popen([str(ROOT/'device-server'),'--root',str(self.feed),'--port','0',*(['--sol-open-view'] if open_view else []),*(['--sol-debug-no-auth'] if no_auth else [])],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         line=self.process.stdout.readline();self.url=line.split()[2].rstrip('/')
         self.http=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def stop(self):
@@ -58,6 +58,25 @@ class SOL(unittest.TestCase):
         self.assertEqual(self.push(key='')[0],403)
         self.assertEqual(self.push()[0],200)
         self.assertEqual(self.request('/api/sol/logs/device-a/boot-a/all/0',key='')[0],200)
+    @unittest.skipUnless(LOG.exists(), "build host logctl to test the uploader")
+    def test_debug_connects_without_any_credentials(self):
+        self.stop()
+        import shutil
+        shutil.rmtree(self.feed/'sol-keys')
+        self.start(no_auth=True)
+        self.assertEqual(self.request('/api/sol/config',key='')[1],{'open_view':True})
+        with self.http.open(self.url+'/api/sol/devices') as r:self.assertEqual(r.status,200)
+        store=self.path/'boots';boot=store/'boot-a';boot.mkdir(parents=True);(boot/'order').write_text('1\n')
+        (boot/'kernel.log').write_text('[seq=1 mono=0 wall=0] no-credential-stream\n')
+        config=self.path/'sol.conf';config.write_text(f'server={self.url}\nauth=none\ndevice=device-a\ninterface=eth0\n')
+        env=dict(os.environ,LOGCTL_SOL_CONFIG=str(config),LOGCTL_RUN_DIR=str(self.path/'run'))
+        self.worker=subprocess.Popen([str(LOG),'forward','--root',str(store)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        for _ in range(80):
+            rows=self.logs()
+            if rows:break
+            self.assertIsNone(self.worker.poll());time.sleep(.1)
+        self.assertEqual(len(rows),1);self.assertIn('no-credential-stream',rows[0]['text'])
+        self.assertFalse((self.feed/'sol-keys').exists())
     def test_cursor_duplicate_and_restart(self):
         self.assertEqual(self.push(),(200,{'next':5}))
         self.assertEqual(self.push(),(409,{'next':5}))

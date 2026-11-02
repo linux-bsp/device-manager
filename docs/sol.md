@@ -6,46 +6,35 @@
 
 SPL、U-Boot 没有独立网络日志会话：Linux 启动后导入保留内存，联网后补传。ROM、TIFS、ATF 和未接入的交互 shell 输出不在采集范围内。启动到 Linux 之前失败、断电丢失 RAM 的日志不能保证回收。
 
-## 凭据与配置
+## 当前调试配置：直接连接
 
-在主机执行一次，生成独立的设备上传凭据和只读查看凭据：
+当前 AM625 调试环境同时关闭网页查看与设备上传的凭据验证。打开 `http://192.168.10.246:8090/#sol` 即自动连接；设备联网后自动上传，不需要注册、密钥文件或手工写入凭据。首页和 SOL 页面不显示凭据输入框。
+
+服务端启动参数：
 
 ```sh
-output/am625/host/bin/device-server sol-enroll \
-  --root output/ota-validation/feed --device 1c-63-49-22-c4-f7
+output/am625/host/bin/device-server --root output/ota-validation/feed \
+  --bind 0.0.0.0 --port 8090 --sol-debug-no-auth
 ```
 
-两种凭据分别存放于 feed 的 `sol-keys/<device-id>` 和 `sol-keys/viewer`，权限 0600。已存在的凭据不会被覆盖。设备只能提交自己的日志；查看凭据能读取所有已登记设备的日志，不能上传。
-
-设备凭据应通过设备本地控制台或受信任的离线方式写到 `/data/device-manager/sol.key`，文件包含一行 64 位十六进制值，权限 0600、所有者 root。**不把凭据提交 Git 或放进可下载的固件包。** 当前测试设备的 `/etc/device-manager/sol.conf` 已随固件提供：
+板级 overlay 已提供 `/etc/device-manager/sol.conf`：
 
 ```ini
 server=http://192.168.10.246:8090
-device=1c-63-49-22-c4-f7
-key-file=/data/device-manager/sol.key
+auth=none
+device=
 interface=eth0
 ```
 
-在确认 `/data` 已挂载到持久化介质后，可在设备串口准备目录和凭据：
+空 device 值表示按接口 MAC 自动生成设备 ID，也可以指定已有 ID。`auth=none` 不读取密钥文件，也不发送 Authorization。该配置只影响日志连接，不改变 OTA 完整性验证、A/B 升级和健康检查。
 
-```sh
-mountpoint -q /data || exit 1
-mkdir -p /data/device-manager
-umask 077
-cat > /data/device-manager/sol.key
-# 粘贴主机 sol-keys/<device-id> 中的一行凭据，然后按 Ctrl-D。
-sync
-```
+页面保留设备、启动记录、阶段和日志筛选；设备首次上线会自动加入列表。60 秒未上报时显示暂未上报。没有可用持久化存储时，仍可使用 RAM 日志并进行网络转发。
 
-不要粘贴 viewer 凭据作为设备上传凭据。后台每 5 秒重试，首次凭据就绪后无需重启。
+## 可选：以后恢复凭据验证
 
-通用设备可省略 device 值，程序从指定接口 MAC 生成 ID。配置使用 `key=value`，没有 shell 展开。固件未提供 sol.conf 时保持本地采集；配置存在但凭据未就绪时后台等待，不阻塞 rcS 或固件健康检查。凭据就绪后自动重试。修改已生效的配置后重新启动 S01logctld。
+无需删除已有凭据；调试模式不使用它们。以后去掉服务端 `--sol-debug-no-auth`，在设备配置中改成 `auth=key` 并指定 `key-file=/data/device-manager/sol.key` 即可恢复验证。`--sol-open-view` 只放开网页查看，不放开设备上传。
 
-临时功能验证可给服务端添加 `--sol-open-view`，Web 自动免凭据连接；设备上传仍必须提供自己的凭据。去掉此参数并重启服务即可恢复查看验证。当前实验服务器按用户要求已启用该选项。
-
-正常验证模式下，打开 `http://192.168.10.246:8090/#sol`，在查看凭据栏填入服务端 `sol-keys/viewer` 内容。凭据只保留在当前页面内存；刷新后重新输入，标签页位置保留。设备停止上报超过 60 秒会提示暂未上报。
-
-当前实验环境使用 HTTP，凭据和日志不加密。跨不可信网络时使用 HTTPS 反向代理，设备 server 改用 HTTPS，libcurl 默认验证服务器证书；不要关闭证书验证。协议不会跟随重定向传递凭据。
+需要凭据时，主机执行 `device-server sol-enroll --root DIR --device DEVICE_ID` 生成 `DIR/sol-keys/DEVICE_ID` 和 `DIR/sol-keys/viewer`。设备密钥单独配置，不能放进固件包或 Git；网页使用 viewer 凭据。缺少必要凭据时后台等待，不阻塞本地采集或 rcS。配置采用 key=value，无 shell 展开；修改已生效配置后重启 S01logctld。
 
 ## 续传与容量
 

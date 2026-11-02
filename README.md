@@ -35,7 +35,7 @@ device-server --root /path/to/feed --bind 0.0.0.0 --port 8090
 ota-cli --server http://192.168.10.246:8090 list
 ```
 
-Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 已提供经过凭据验证的只读日志流、历史回放、阶段筛选与导出；设备主动连接，不依赖 SSH。配置和验收见 [SOL 与板卡验收](docs/sol.md)。
+Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出；当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。配置和验收见 [SOL 与板卡验收](docs/sol.md)。
 
 ## 设备日志
 
