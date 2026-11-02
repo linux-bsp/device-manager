@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Manager · 设备管理</title>
+<style>
+:root{color-scheme:light;font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#172536;background:#f4f6f9}*{box-sizing:border-box}body{margin:0}header{background:#14263d;color:white;padding:25px max(24px,calc((100% - 1120px)/2))}header span{font-size:12px;letter-spacing:2px;color:#b6c7dc}h1{font-size:27px;margin:4px 0}header p{margin:0;color:#c8d4e3}main{max-width:1168px;margin:28px auto;padding:0 24px 50px}h2{font-size:18px;margin:0 0 8px}p{margin:6px 0 16px}.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:20px}.card{background:#fff;border:1px solid #dce3eb;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 3px 12px #15263b05}.muted{color:#64748b}.current{font-size:32px;line-height:1.3;margin:14px 0 8px}.badge{display:inline-block;border-radius:20px;padding:3px 10px;font-size:12px;background:#e6edf7;color:#274d7a}.green{background:#e3f5ed;color:#146542}.upload-area{border:1px dashed #9aabc0;border-radius:8px;padding:20px;background:#fafbfd;margin:18px 0}input[type=file]{display:block;width:100%;margin-top:12px;font:inherit;font-size:13px}button{border:0;border-radius:7px;background:#1d5db7;color:#fff;padding:9px 16px;cursor:pointer;font:inherit;font-weight:600}button:hover{background:#184d97}button:disabled{opacity:.5;cursor:default}.secondary{background:#edf1f6;color:#33455d}.secondary:hover{background:#dfe6ef}.row{display:flex;align-items:center;justify-content:space-between;gap:16px}.step{color:#44618a;font-size:12px;font-weight:700;letter-spacing:1px;margin-bottom:6px}progress{width:100%;height:9px;margin-top:16px;accent-color:#1d5db7}.notice{border-radius:8px;padding:12px 16px;margin-bottom:20px;background:#e4f4ec;color:#145638;white-space:pre-wrap}.notice.error{background:#fff0ef;color:#9f2921}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid #e6ebf1}th{font-size:12px;color:#64748b}td small{display:block;color:#64748b}.empty{padding:24px 0;color:#64748b;text-align:center}code{font:13px ui-monospace,monospace}footer{color:#64748b;font-size:13px}#file-info{overflow-wrap:anywhere;font-size:13px}button:focus-visible,input:focus-visible{outline:3px solid #7ba9ec;outline-offset:3px}[hidden]{display:none!important}@media(max-width:760px){.grid{grid-template-columns:1fr;gap:0}.card{padding:18px}main{padding:0 14px 30px}.row{align-items:flex-start}h1{font-size:24px}}
+.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}.tabs button{background:#e6edf7;color:#274d7a}.tabs button[aria-selected=true]{background:#1d5db7;color:white}a.download{display:inline-block;margin:6px 10px 6px 0;color:#1d5db7}#firmware-detail{max-width:1120px;margin:auto}#current-details{overflow-wrap:anywhere}.upload-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(240px,1fr);gap:28px}.upload-main,.upload-sidebar{min-width:0}.upload-sidebar{border-left:1px solid #e6ebf1;padding-left:28px}.upload-sidebar .current{font-size:25px}.upload-sidebar .row{align-items:flex-start}.upload-sidebar .row button{padding:5px 10px;font-size:13px}#drafts td:last-child button{margin-right:10px}#drafts .download{font-size:13px}main{max-width:1400px}@media(max-width:760px){.upload-layout{grid-template-columns:minmax(0,1fr);gap:18px}.upload-sidebar{border-left:0;border-top:1px solid #e6ebf1;padding:18px 0 0}}
+.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}.toolbar input{padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;min-width:0;flex:1}.toolbar label{font-size:14px}.publishing,.publishing:disabled{background:#e5e7eb;color:#4b5563;opacity:1;cursor:default}.invalid,.invalid:disabled{background:#b42318;color:white;opacity:1;cursor:not-allowed}.network-info{white-space:normal;overflow-wrap:anywhere;max-width:480px}td button{margin-right:10px}.filter-count{font-size:13px;color:#64748b}a{color:#1d5db7}
+.module-sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:#14263d;color:#dce6f3;padding:28px 16px}.brand{font-size:21px;font-weight:700;color:white}.module-sidebar p{color:#9eb3cc}.module-sidebar nav{display:grid;gap:8px;margin-top:28px}.module-sidebar a{padding:12px;border-radius:8px;text-decoration:none;color:#c8d4e3}.module-sidebar a[aria-current=page]{background:#294563;color:white}.workspace{margin-left:220px}header{padding:26px 32px;background:white;color:#172536;border-bottom:1px solid #dce3eb}header p,header span{color:#64748b}@media(max-width:760px){.module-sidebar{position:static;width:auto;padding:14px}.module-sidebar nav{display:flex;margin-top:8px}.module-sidebar p{display:none}.workspace{margin-left:0}header{padding:20px}}
+</style>
+</head>
+<body>
+<aside class="module-sidebar"><div class="brand">Device Manager</div><p>设备管理</p><nav aria-label="功能模块"><a id="module-ota" href="/#manage" aria-current="page">OTA 固件管理</a><a id="module-sol" href="/#sol">SOL 远程控制台</a></nav></aside>
+<div class="workspace"><header><span>DEVICE MANAGER</span><h1 id="module-title">OTA 固件管理</h1><p id="module-description">上传固件包，发布版本，追踪设备升级结果。</p></header>
+<main>
+<section id="sol-panel" class="card" hidden><h2>SOL 远程控制台</h2><p><span class="badge">尚未接入</span></p><p>设备本地日志工具正在接入。当前页面尚不提供串口连接、日志流或远程命令。</p><p class="muted">后续通过专用设备连接提供日志回放与控制台会话。设备重启期间的在线能力取决于网络及控制台实现。</p></section>
+<div id="notice" class="notice" role="status" hidden></div>
+<section id="firmware-detail" class="card" hidden></section>
+<div id="overview">
+<div class="tabs" role="tablist" aria-label="固件管理"><button type="button" role="tab" id="tab-manage" aria-controls="panel-manage" aria-selected="true" tabindex="0" data-tab="manage">上传与发布</button><button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1" data-tab="history">升级历史</button><button type="button" role="tab" id="tab-releases" aria-controls="panel-releases" aria-selected="false" tabindex="-1" data-tab="releases">发布记录</button><button type="button" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="false" tabindex="-1" data-tab="audit">异常审计</button></div>
+<div role="tabpanel" id="panel-manage" aria-labelledby="tab-manage">
+<section class="card"><div class="upload-layout"><div class="upload-main"><h2>上传固件</h2>
+<p class="muted">上传后先保存为待发布版本，设备不会立即下载。</p>
+<form id="upload-form">
+<div class="upload-area"><label for="firmware"><strong>选择固件包（.tar.gz）</strong></label>
+<div class="muted">包含 release.itb、kernel.itb 和 rootfs.itb，最大 512 MiB。</div>
+<input id="firmware" type="file" accept=".tar.gz,.tgz" required>
+<div id="file-info" class="muted"></div></div>
+<button id="upload-button" type="submit" disabled>上传并校验</button>
+<progress id="progress" max="100" value="0" hidden aria-label="上传进度"></progress>
+<p id="upload-status" class="muted" aria-live="polite"></p>
+</form></div><aside class="upload-sidebar"><div class="row"><div class="step">设备当前可获取的版本</div><button id="refresh" class="secondary" type="button">刷新</button></div>
+<div id="current-version" class="current">加载中…</div>
+<div id="current-details" class="muted"></div>
+<p class="muted" style="margin-top:18px">设备会检查已发布版本，完成升级并通过健康检查后上报结果。</p>
+</aside></div></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
+<div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
+<div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
+</section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>
+<div id="releases-empty" class="empty" hidden>尚未发布版本。</div>
+<div class="table-wrap"><table id="releases-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="releases"></tbody></table></div>
+</section><section class="card" role="tabpanel" id="panel-history" aria-labelledby="tab-history" hidden><h2>设备升级历史</h2>
+<p class="muted">保留每次升级及各阶段上报记录。只有重启后通过健康检查，才显示升级成功。</p>
+<div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>设备</th><th>结果</th><th>最近上报</th><th>详情 / 网络审计</th></tr></thead><tbody id="devices"></tbody></table></div>
+</section><section class="card" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit" hidden><h2>固件异常与回退审计</h2><p class="muted">异常固件全局停发；存在健康检查成功的历史版本时自动回退发布。保留设备、原因、固件哈希和处理动作。</p><div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>时间</th><th>设备</th><th>分类 / 原因</th><th>处理动作 / 详情</th></tr></thead><tbody id="audit"></tbody></table></div></section>
+<footer>设备会自动下载已发布版本。上传但未发布的固件对设备不可见。</footer>
+</div>
+</main></div>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let busy = false;
+let refreshing = null;
+function notice(message, error=false){$('notice').textContent=message;$('notice').className='notice'+(error?' error':'');$('notice').hidden=false;}
+function size(bytes){return (bytes/1048576).toFixed(1)+' MiB';}
+function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
+function detailLink(item,tab=activeTab()){const a=document.createElement('a');a.textContent='查看详情';a.href='/firmware?kind='+((item.id||'').startsWith('draft-')?'draft':'release')+'&id='+encodeURIComponent(item.id)+'&tab='+tab;return a;}
+function identityCells(row,item){cell(row,item.product||'未知');cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
+function invalidButton(){const b=document.createElement('button');b.type='button';b.className='invalid';b.disabled=true;b.textContent='无效固件，禁止发布';b.title='固件已隔离，不能发布到设备';return b;}
+function publishingButton(){const b=document.createElement('button');b.type='button';b.className='publishing';b.disabled=true;b.textContent='当前版本使用中';return b;}
+function activeTab(){return document.querySelector('[data-tab][aria-selected=true]')?.dataset.tab||'manage';}
+function searchable(row,item){row.dataset.search=JSON.stringify(item);}
+const lists={manage:'drafts',history:'devices',releases:'releases',audit:'audit'};
+function filterRows(tab){const tokens=$('search-'+tab).value.trim().toLowerCase().split(/\s+/).filter(Boolean);let visible=0,total=0;for(const row of $(lists[tab]).children){total++;const text=((row.dataset.search||'')+' '+row.textContent).toLowerCase();row.hidden=!tokens.every(t=>text.includes(t));if(!row.hidden)visible++;}$('count-'+tab).textContent=`${visible} / ${total} 条`;$('empty-'+tab).hidden=visible>0;}
+function downloadLink(item){const link=document.createElement('a');link.className='download';link.textContent='下载固件包';link.href='/api/download/'+(item.id.startsWith('draft-')?'draft':'release')+'/'+encodeURIComponent(item.id);return link;}
+function badge(td,text,current=false){const span=document.createElement('span');span.className='badge'+(current?' green':'');span.textContent=text;td.append(span);}
+function controls(){ const disabled=busy||!!refreshing; $('upload-button').disabled=disabled||!$('firmware').files.length; $('firmware').disabled=disabled; document.querySelectorAll('[data-refresh],#refresh').forEach(b=>b.disabled=disabled); document.querySelectorAll('[data-publish]').forEach(b=>b.disabled=disabled); }
+function state(){
+ if(refreshing)return refreshing;
+ refreshing=loadState().finally(()=>{refreshing=null;controls();});
+ controls();return refreshing;
+}
+async function loadState(){
+ const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw new Error('无法读取版本列表，请检查服务日志。');
+ const data=await response.json();
+ if(location.pathname==='/firmware'){renderDetails(data);return;}
+ const current=data.releases.find(r=>r.publication===data.latest);
+ $('current-version').textContent=current?(current.tag||current.firmware_version):'尚未发布';
+ $('current-details').textContent=current?`${(current.firmware_id||'').slice(0,8)} · ${current.product}`:'上传固件并发布后，设备即可获取。';
+ $('current-details').title=current?.firmware_id||'';
+ const phases={'requested':'请求升级','installing':'正在安装','rebooting':'等待重启','boot-testing':'启动健康检查中','success':'升级成功','install-failed':'安装失败','rolled-back':'已回滚','interrupted':'升级中断','reboot-failed':'重启失败','up-to-date':'无需升级','device-error':'设备异常','verify-failed':'固件校验失败'};
+ const why=r=>r==='not-reported'?'原因未上报':r==='none'?'—':r||'未上报';
+ const fmt=v=>v?`v${v>>>16}.${(v>>>8)&255}.${v&255}`:'未知';
+ const when=v=>new Date(v*1000).toLocaleString();
+ const identity=d=>data.releases.find(r=>r.publication===d.publication)||{product:d.product,tag:fmt(d.version)};
+ for(const [tab,list] of Object.entries(lists))$(list).replaceChildren();
+ $('drafts-empty').hidden=true;$('releases-empty').hidden=true;
+ for(const [items,tbody] of [[data.drafts,'drafts'],[data.releases,'releases']]){
+  for(const d of [...items].sort((a,b)=>b.created-a.created||b.publication-a.publication)){
+   const row=document.createElement('tr');if(tbody==='drafts')row.dataset.draft=d.id;
+   identityCells(row,d);cell(row,size(d.bytes));
+   const action=cell(row,'');
+   if(!d.valid)action.append(invalidButton());
+   else if(d.published)action.append(publishingButton());
+   else {const draft=tbody==='drafts'?d:data.drafts.find(x=>x.valid&&x.firmware_id===d.firmware_id);if(draft){const b=document.createElement('button');b.type='button';b.textContent='发布到设备';b.dataset.publish=draft.id;b.onclick=()=>publish(draft.id);action.append(b);}else action.textContent='未发布';}
+   cell(row,'').append(detailLink(d,tbody==='drafts'?'manage':'releases'));
+   searchable(row,{...d,status:!d.valid?'无效':d.published?'已发布':'未发布',created_text:when(d.created)});$(tbody).append(row);
+  }
+ }
+ for(const d of [...(data.device_history||[])].sort((a,b)=>b.updated-a.updated||b.publication-a.publication)){
+  const item=identity(d),row=document.createElement('tr');identityCells(row,item);cell(row,d.device);
+  const result=cell(row,phases[d.phase]||d.phase);const reason=document.createElement('small');reason.textContent=why(d.reason);result.append(reason);
+  cell(row,when(d.updated));const td=cell(row,'');td.className='network-info';
+  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent=`查看过程与设备信息（${d.events.length} 次上报）`;details.append(summary);
+  const line=text=>{const e=document.createElement('div');e.textContent=text;details.append(e);};
+  if(d.imported)line('旧数据迁移：迁移前仅保留当时的最后状态。');
+  for(const e of d.events)line(`${when(e.reported_at)} · ${phases[e.phase]||e.phase} · 运行 ${fmt(e.running)} · ${why(e.reason)}`);
+  line('升级来源启动 ID：'+d.source_boot);
+  if(!(d.network||[]).length)line('IP / MAC / hostname：历史设备未上报');
+  for(const n of d.network||[])line(`${when(n.first_seen)} — ${when(n.last_seen)} · ${phases[n.phase]||n.phase} · IP ${n.ip} · MAC ${n.mac} · hostname ${n.hostname} · 来源 IP ${n.peer_ip} · 请求 ${n.requests} 次 · 启动 ID ${n.request_boot}`);
+  td.append(details);if(item.id)td.append(detailLink(item,'history'));searchable(row,{...d,firmware:item});$('devices').append(row);
+ }
+ const actions={'manual-fallback-published':'人工应急回退发布','quarantined':'标记固件异常','distribution-stopped':'停止全部下发','fallback-selected':'选定正常版本','fallback-published':'已回退发布','no-confirmed-fallback':'无确认正常版本，保持停发'};
+ for(const e of [...(data.audit_events||[])].sort((a,b)=>b.timestamp-a.timestamp)){
+  const item=identity(e),row=document.createElement('tr');identityCells(row,item);cell(row,when(e.timestamp));cell(row,e.device);cell(row,`${e.category==='device-error'?'设备异常':'升级失败'} / ${why(e.reason)}`);
+  const td=cell(row,actions[e.action]||e.action);td.className='network-info';const details=document.createElement('details');const title=document.createElement('summary');title.textContent='查看溯源';details.append(title);
+  for(const text of [`发布记录 ${e.publication} · 回退来源 ${e.source_publication||'无'} · 回退发布 ${e.replacement_publication||'无'}`,e.kernel_sha256,e.rootfs_sha256,e.boot]){const line=document.createElement('div');line.textContent=text;details.append(line);}td.append(details);if(item.id)td.append(detailLink(item,'audit'));searchable(row,{...e,firmware:item});$('audit').append(row);
+ }
+ for(const tab of Object.keys(lists))filterRows(tab);
+ controls();
+}
+
+function renderDetails(data){
+ $('overview').hidden=true;
+ const pane=$('firmware-detail');pane.hidden=false;pane.replaceChildren();
+ const back=document.createElement('a');back.href='/#'+(new URLSearchParams(location.search).get('tab')||'manage');back.textContent='← 返回固件列表';pane.append(back);
+ const refresh=document.createElement('button');refresh.className='secondary';refresh.textContent='刷新详情';refresh.style.marginLeft='20px';refresh.onclick=()=>state().catch(e=>notice(e.message,true));pane.append(refresh);
+ const params=new URLSearchParams(location.search);
+ const collection=params.get('kind')==='draft'?data.drafts:data.releases;
+ const item=collection.find(x=>x.id===params.get('id'));
+ const title=document.createElement('h1');title.textContent='固件详情';pane.append(title);
+ if(!item){const message=document.createElement('p');message.textContent='未找到该固件。';pane.append(message);return;}
+ document.title=(item.tag||item.firmware_version)+' · 固件详情';
+ pane.append(downloadLink(item));
+ const publications=data.releases.filter(x=>x.firmware_id===item.firmware_id);
+ const ids=new Set(publications.map(x=>x.publication));
+ const history=(data.device_history||[]).filter(x=>ids.has(x.publication));
+ const downloads=(data.download_stats||[]).filter(x=>ids.has(x.publication));
+ const sum=key=>downloads.reduce((n,x)=>n+(x[key]||0),0);
+ const success=history.filter(x=>x.phase==='success').length;
+ const failures=history.filter(x=>x.category==='upgrade-failure');
+ const incidents=history.filter(x=>x.category==='device-error');
+ const active=publications.find(x=>x.published);
+ const table=document.createElement('table');pane.append(table);
+ const rows=[['上传时间',item.uploaded_at?new Date(item.uploaded_at*1000).toLocaleString():'未知'],
+ ['版本号',item.tag||item.firmware_version],['内容哈希',item.firmware_id],['产品 / 布局',item.product+' / '+item.layout],
+ ['固件大小',size(item.bytes)],['发布状态',active?'已发布 #'+active.publication:'未发布'],
+ ['是否有效',item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],
+ ['设备下载次数',String(sum('identified_downloads'))],['未识别设备的下载次数',String(sum('downloads')-sum('identified_downloads'))],
+ ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)],
+ ['历史发布编号',publications.map(x=>'#'+x.publication).join('、')||'尚未发布']];
+ for(const [key,value] of rows){const row=document.createElement('tr');cell(row,key);const td=cell(row,value);td.style.whiteSpace='normal';td.style.overflowWrap='anywhere';table.append(row);}
+ const note=document.createElement('p');note.className='muted';note.textContent='统计按相同内容哈希汇总。下载按 rootfs.itb 完整响应计次，重试和恢复下载会再次计数；不代表安装成功。未携带设备 ID 的请求单列，旧版本启用统计前的下载无法追溯。升级结果按每次升级事务最终状态计数，成功必须经过重启健康确认。';pane.append(note);
+ const heading=document.createElement('h2');heading.textContent='失败与设备异常原因';pane.append(heading);
+ const errors=failures.concat(incidents).sort((a,b)=>b.updated-a.updated);
+ for(const entry of errors){const line=document.createElement('p');line.textContent=`#${entry.publication} · ${entry.device} · ${entry.phase} · ${entry.reason||'原因未上报'} · ${new Date(entry.updated*1000).toLocaleString()}`;pane.append(line);}
+ if(!errors.length){const line=document.createElement('p');line.textContent='暂无失败或设备异常记录。';pane.append(line);}
+ const candidate=data.drafts.find(x=>x.firmware_id===item.firmware_id&&x.valid);
+ if(!item.valid)pane.append(invalidButton());
+ else if(active)pane.append(publishingButton());
+ if(!active&&candidate){const button=document.createElement('button');button.dataset.publish=candidate.id;button.textContent='发布到设备';button.onclick=()=>publish(candidate.id);pane.append(button);}
+ controls();
+}
+async function publish(id){
+ busy=true;controls();
+ try{const r=await fetch('/api/publish/'+id,{method:'POST',headers:{'X-OTA-Request':'1'}});const result=await r.json();if(!r.ok)throw new Error(result.error||'发布失败');notice(`已发布 #${result.publication}。设备将在下一次检查时下载该版本。`);await state();}
+ catch(error){notice(error.message,true);}finally{busy=false;controls();}
+}
+$('firmware').addEventListener('change',()=>{const f=$('firmware').files[0];$('file-info').textContent=f?f.name+' · '+size(f.size):'';controls();});
+$('upload-form').addEventListener('submit',event=>{
+ event.preventDefault();const file=$('firmware').files[0];if(!file||busy)return;
+ if(file.size>512*1048576){notice('固件包超过 512 MiB，请检查是否选中了完整烧录镜像。',true);return;}
+ busy=true;controls();$('progress').hidden=false;$('progress').value=0;$('upload-status').textContent='正在上传…';
+ const xhr=new XMLHttpRequest();xhr.open('POST','/api/upload');xhr.timeout=240000;xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-OTA-Request','1');
+ xhr.upload.onprogress=e=>{if(e.lengthComputable){const percent=Math.round(e.loaded/e.total*100);$('progress').value=percent;$('upload-status').textContent=percent===100?'上传完成，正在校验固件包…':`正在上传 ${percent}%`;}};
+ xhr.onload=async()=>{try{const result=JSON.parse(xhr.responseText);if(xhr.status<200||xhr.status>=300)throw new Error(result.error||'上传失败');$('firmware').value='';$('file-info').textContent='';$('upload-status').textContent='校验通过，已保存为待发布版本。';notice('上传成功。请在待发布列表中点击“发布到设备”。');await state();}catch(error){$('upload-status').textContent='上传或校验失败。';notice(error.message,true);}finally{busy=false;controls();}};
+ xhr.onerror=xhr.ontimeout=()=>{busy=false;controls();$('upload-status').textContent='上传未完成。';notice('网络连接失败或超时，请重试。',true);};xhr.send(file);
+});
+const tabs=[...document.querySelectorAll('[data-tab]')];
+function selectTab(button,update=true){if(update&&location.hash!=='#'+button.dataset.tab)location.hash=button.dataset.tab;for(const tab of tabs){const selected=tab===button;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;$(tab.getAttribute('aria-controls')).hidden=!selected;}}
+for(const tab of tabs){tab.onclick=()=>selectTab(tab);tab.onkeydown=event=>{let index=tabs.indexOf(tab);if(event.key==='ArrowRight')index=(index+1)%tabs.length;else if(event.key==='ArrowLeft')index=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')index=0;else if(event.key==='End')index=tabs.length-1;else return;event.preventDefault();selectTab(tabs[index]);tabs[index].focus();};}
+for(const [tab,list] of Object.entries(lists)){
+ const bar=document.createElement('div');bar.className='toolbar';
+ const label=document.createElement('label');label.htmlFor='search-'+tab;label.textContent='筛选';
+ const input=document.createElement('input');input.type='search';input.id=label.htmlFor;input.placeholder='版本、完整或短哈希、产品、状态、设备 IP / MAC / hostname…';
+ try{input.value=sessionStorage.getItem(input.id)||'';}catch{}
+ input.oninput=()=>{try{sessionStorage.setItem(input.id,input.value);}catch{}filterRows(tab);};
+ const refresh=document.createElement('button');refresh.type='button';refresh.className='secondary';refresh.dataset.refresh=tab;refresh.textContent='刷新';
+ const count=document.createElement('span');count.id='count-'+tab;count.className='filter-count';count.setAttribute('aria-live','polite');
+ bar.append(label,input,refresh,count);const wrap=$(list).closest('.table-wrap');wrap.before(bar);
+ const empty=document.createElement('p');empty.id='empty-'+tab;empty.className='empty';empty.textContent='暂无记录或没有符合筛选条件的记录。';empty.hidden=true;wrap.after(empty);
+}
+function restoreTab(){
+ const sol=location.pathname!=='/firmware'&&location.hash==='#sol';
+ $('sol-panel').hidden=!sol;$('overview').hidden=sol||location.pathname==='/firmware';
+ $('module-title').textContent=sol?'SOL 远程控制台':'OTA 固件管理';
+ $('module-description').textContent=sol?'串口会话与启动日志':'上传固件包，发布版本，追踪设备升级结果。';
+ $('module-ota').setAttribute('aria-current',sol?'false':'page');$('module-sol').setAttribute('aria-current',sol?'page':'false');
+ selectTab(tabs.find(t=>t.dataset.tab===location.hash.slice(1))||tabs[0],false);
+}
+window.addEventListener('hashchange',restoreTab);restoreTab();
+document.querySelectorAll('[data-refresh],#refresh').forEach(b=>b.onclick=()=>state().catch(e=>notice(e.message,true)));
+state().catch(e=>notice(e.message,true));
+</script>
+</body>
+</html>

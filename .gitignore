@@ -1,0 +1,9 @@
+/bin/
+/build/
+/ota/device-server
+/ota/fwctld
+/ota/ota-cli
+/ota/ota-page.h
+/logging/logctl
+/logging/logctld
+__pycache__/

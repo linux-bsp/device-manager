@@ -1,0 +1,15 @@
+# Repository Guidelines
+
+## Structure
+`ota/` contains the C management server, OTA CLI, firmware daemon, shared protocol and embedded Web page. `firmware/` owns the standalone A/B engine; `fwctl/` contains the device CLI and peripheral health adapter. `logging/` provides logctl/logctld. Keep board layouts and Buildroot package definitions in the sibling bsp-base-external repository.
+
+## Build and Test
+Use `make host` for device-server and ota-cli, and `make device` with the target compiler for fwctl, fwctld, logctl and logctld. Supply dependency paths through CPPFLAGS and LDFLAGS. Buildroot installs host tools under host/bin and device tools under target/usr/sbin. Never execute a target binary on the build host without the matching emulator/sysroot.
+
+Run `python3 tests/test_firmware.py`, `make -C logging test` and `make -C ota test`. Board integration tests expect the surrounding workspace. Test rollover, process lifetime, corrupted input and interrupted firmware transactions. Preserve existing on-media metadata and network protocol compatibility when refactoring source organization.
+
+## Style and Boundaries
+Use C11 or GNU C11, four spaces in new userspace code, and existing indentation in migrated files. Compile with Wall, Wextra and Werror. Use concise `[module] [INFO|WARN|ERROR]` logs. Human-facing hashes use eight characters; checks and audit records use full SHA256. Do not claim SOL is operational until an actual authenticated transport exists. Device firmware operations must remain independent of a reachable management server.
+
+## Releases and Commits
+Keep the firmware tag v0.0.1 unless explicitly instructed otherwise. Test, build and publish authorized firmware changes, then commit the matching source only after the intended device reports success following reboot and health checks. An OTA success does not validate an uninstalled bootloader or durable storage that was not provisioned. Preserve source snapshots and validation results. Use concise `feat:`, `fix:` or `refactor:` commits; update dependent workspace gitlinks after child commits. Push only when requested. Never auto-format device storage or overwrite earlier release artifacts.

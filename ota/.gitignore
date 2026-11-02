@@ -1,0 +1,7 @@
+/device-server
+/fwctld
+/ota-page.h
+
+__pycache__/
+
+/ota-cli
