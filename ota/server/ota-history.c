@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -180,9 +181,17 @@ static int walk_history(const char *root, int (*visit)(const struct history *, v
             if (entry->d_name[0] == '.') continue;
             struct history h; char name[96];
             if (ota_path(path, dir, entry->d_name) || read_history(path, &h, NULL, NULL) ||
-                strcmp(h.last.device, device->d_name)) { rc = -1; break; }
+                strcmp(h.last.device, device->d_name)) {
+                fprintf(stderr, "[device-server] [ERROR] Invalid upgrade history entry: %s/%s\n",
+                        dir, entry->d_name);
+                rc = -1; break;
+            }
             snprintf(name, sizeof(name), "%llu-%s", h.last.publication, h.last.boot);
-            if (strcmp(name, entry->d_name) || visit(&h, context)) { rc = -1; break; }
+            if (strcmp(name, entry->d_name) || visit(&h, context)) {
+                fprintf(stderr, "[device-server] [ERROR] Cannot replay upgrade history entry: %s/%s\n",
+                        dir, entry->d_name);
+                rc = -1; break;
+            }
         }
         closedir(records);
     }
@@ -209,7 +218,46 @@ unsigned long long ota_history_last_good(const char *root, unsigned long long be
 }
 static int replay_incident(const struct history *h, void *context)
 {
-    return h->incident.publication ? ota_quarantine_report(context, &h->incident) : 0;
+    const char *root = context;
+    const struct ota_report *r = &h->incident;
+    if (!r->publication)
+        return 0;
+
+    /* Old, already quarantined releases may have damaged FIT data. Their
+     * validated audit and quarantine marker are sufficient for replay while
+     * a different release is active. Never skip replay for the active image. */
+    char latest_path[OTA_PATH], audit_path[OTA_PATH], relative[256];
+    struct release active;
+    int length = snprintf(relative, sizeof(relative), "audit/%llu-%s-%s-%s-quarantined-0",
+                          r->publication, r->device, r->boot, r->phase);
+    if (length > 0 && (size_t)length < sizeof(relative) &&
+        !ota_path(latest_path, root, "latest") && !ota_read(latest_path, &active) &&
+        active.version != r->publication && !ota_path(audit_path, root, relative)) {
+        int fd = open(audit_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        if (fd >= 0) {
+            struct stat st;
+            FILE *file = !fstat(fd, &st) && S_ISREG(st.st_mode) ? fdopen(fd, "r") : NULL;
+            if (file) {
+                char header[512], report[OTA_REPORT_SIZE], expected[OTA_REPORT_SIZE];
+                long long when;
+                unsigned long long failed, source, replacement;
+                char kernel[65], rootfs[65], extra;
+                int valid = fgets(header, sizeof(header), file) &&
+                    fgets(report, sizeof(report), file) &&
+                    sscanf(header, "BSPOTAAUDIT1 %lld quarantined %llu %llu %llu %64s %64s %c",
+                           &when, &failed, &source, &replacement, kernel, rootfs, &extra) == 6 &&
+                    failed == r->publication && !ota_report_format(expected, r) &&
+                    !strcmp(report, expected) &&
+                    ota_quarantine_hashes_blocked(root, kernel, rootfs) == 1;
+                fclose(file);
+                if (valid)
+                    return 0;
+            } else {
+                close(fd);
+            }
+        }
+    }
+    return ota_quarantine_report(root, r);
 }
 int ota_history_incidents(const char *root) { return walk_history(root, replay_incident, (void *)root); }
 

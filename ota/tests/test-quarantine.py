@@ -60,6 +60,13 @@ class Quarantine(unittest.TestCase):
         self.restart()
         self.assertEqual(self.state()['latest'],3)
         self.assertEqual(len(self.state()['audit_events']),len(events))
+    def test_restart_with_corrupt_old_quarantined_fit(self):
+        self.setup_releases()
+        self.report(2,65538,'rolled-back',reason='boot-failed-rolled-back')
+        (self.feed/'releases/2/release.itb').write_bytes(b'corrupt old image')
+        self.restart()
+        self.assertEqual(self.request('GET','/healthz')[0],200)
+        self.assertEqual(self.request('GET','/releases/3/kernel.itb')[0],200)
     def test_device_exception_has_separate_count_but_same_stop_and_fallback(self):
         self.setup_releases()
         self.report(2,65538,'success',device='board-success',reason='none')
