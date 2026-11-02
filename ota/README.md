@@ -16,7 +16,7 @@
 make -C bsp-base-external/device-manager/ota
 export PATH="$PWD/output/am625/host/bin:$PATH"
 mkdir -p output/ota-feed
-bsp-base-external/device-manager/ota/device-server \
+device-manager/ota/device-server \
     --root "$PWD/output/ota-feed" --bind 0.0.0.0 --port 8090
 ```
 
@@ -350,8 +350,8 @@ fwctld 边读边转发 stdout/stderr，不再等安装结束后一次性打印�
 
 工具职责：`device-server` 管理服务端，`ota-cli` 操作服务端，`fwctl` 执行设备本地固件操作，
 `fwctld` 负责后台 OTA 流程。协议、发布编号、设备 ID 和服务器上的升级历史保持兼容。
-设备 daemon 源码为 `fwctld.c`、`fwctld-auto.c`、`fwctld-log.c`；共享 OTA 协议代码
-仍与服务端放在 `device-manager/ota/`。
+设备 daemon 源码位于 `ota/agent/`，共享 OTA 协议位于 `ota/shared/`，服务端实现位于
+`ota/server/`；构建产物仍是 `ota/fwctld`、`ota/device-server` 和 `ota/ota-cli`。
 
 | 项目 | 新名称 |
 | --- | --- |

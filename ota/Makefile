@@ -1,6 +1,11 @@
 CC ?= cc
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
+INCLUDES = -I. -Iserver -Iagent -Ishared
+SERVER_SOURCES = $(wildcard server/*.c) shared/ota-common.c shared/ota-report.c
+SERVER_HEADERS = $(wildcard server/*.h shared/*.h)
+AGENT_SOURCES = $(wildcard agent/*.c) shared/ota-common.c shared/ota-report.c
+AGENT_HEADERS = $(wildcard agent/*.h shared/*.h)
 
 .PHONY: all test clean
 all: device-server fwctld ota-cli
@@ -8,14 +13,14 @@ all: device-server fwctld ota-cli
 ota-page.h: web/index.html web/styles.css web/app.js web/fleet.js web/sol-console.js web/embed.py
 	python3 web/embed.py $@
 
-device-server: sol.c sol.h ota-catalog.c device-server.c ota-quarantine.c ota-identity.c ota-admin.c ota-admin.h ota-publish.c ota-common.c ota-common.h ota-device.c ota-history.c ota-report.c ota-device.h ota-page.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) sol.c ota-catalog.c device-server.c ota-quarantine.c ota-identity.c ota-admin.c ota-publish.c ota-common.c ota-device.c ota-history.c ota-report.c $(LDFLAGS) -lz -lsqlite3 -o $@
+device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(SERVER_SOURCES) $(LDFLAGS) -lz -lsqlite3 -o $@
 
-fwctld: fwctld-network.c fwctld-network.h fwctld-log.c fwctld-log.h fwctld.c fwctld-auto.c ota-common.c ota-common.h ota-report.c ota-device.h fwctld-auto.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) fwctld.c fwctld-auto.c fwctld-log.c fwctld-network.c ota-common.c ota-report.c $(LDFLAGS) -o $@
+fwctld: $(AGENT_SOURCES) $(AGENT_HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(AGENT_SOURCES) $(LDFLAGS) -o $@
 
-ota-cli: ota-cli.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) ota-cli.c $(LDFLAGS) -o $@
+ota-cli: cli/ota-cli.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) cli/ota-cli.c $(LDFLAGS) -o $@
 
 test: all
 	node --test ./tests/test-sol-console.cjs

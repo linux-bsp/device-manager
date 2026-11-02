@@ -13,7 +13,12 @@
 
 ## 目录
 
-- `ota/`：服务端、CLI、升级代理、共享协议及 Web 页面。
+- `ota/server/`：管理服务、OTA 发布与审计、SOL 存储和 API。
+- `ota/agent/`：设备端自动升级代理、网络检查与结果上报。
+- `ota/cli/`：主机命令行发布工具。
+- `ota/shared/`：服务端和代理共用的 OTA 协议、校验与报告格式。
+- `ota/web/`：离线管理页面、样式与脚本；构建时嵌入服务端。
+- `ota/tests/`：跨模块的 HTTP、升级和页面回归测试。
 - `firmware/`：独立固件操作引擎，不链接 EDK 库。
 - `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
 - `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Structure
-`ota/` contains the C management server, OTA CLI, firmware daemon, shared protocol and embedded Web page. `firmware/` owns the standalone A/B engine; `fwctl/` contains the device CLI and peripheral health adapter. `logging/` provides logctl/logctld. Keep board layouts and Buildroot package definitions in the sibling bsp-base-external repository.
+`ota/server/`, `ota/agent/`, `ota/cli/`, `ota/shared/`, and `ota/web/` separate the host API, device poller, publication CLI, shared protocol, and offline UI. `ota/tests/` covers their integration. `firmware/` owns the standalone A/B engine; `fwctl/` contains the device CLI and peripheral health adapter. `logging/` provides logctl/logctld. Keep board layouts and Buildroot package definitions in the sibling bsp-base-external repository.
 
 ## Build and Test
 Use `make host` for device-server and ota-cli, and `make device` with the target compiler for fwctl, fwctld, logctl and logctld. Supply dependency paths through CPPFLAGS and LDFLAGS. Buildroot installs host tools under host/bin and device tools under target/usr/sbin. Never execute a target binary on the build host without the matching emulator/sysroot.
