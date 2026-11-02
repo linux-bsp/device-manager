@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise real daemon/CLI with isolated runtime directories, no device writes."""
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -66,6 +67,25 @@ class Logging(unittest.TestCase):
         self.assertEqual(result.returncode,7)
         self.assertIn('early-message',result.stdout)
         self.start();self.wait(lambda:'early-message' in self.text())
+    def test_partial_console_bytes_are_preserved(self):
+        self.start()
+        fragments = [b'Starting CAN: ', b'OK\n\n   kernel\r\n',
+                     '[fwctl] [INFO] 中文'.encode(), b'\n# ']
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            for fragment in fragments:
+                sock.sendto(b'services'.ljust(16, b'\0') + fragment, str(self.run/'socket'))
+        self.wait(lambda: '# ' in self.text())
+        self.stop()
+        raw = (self.store/'test-boot-1/services.log').read_bytes()
+        body = b''
+        while raw:
+            header = re.match(rb'\[seq=\d+ mono=[0-9.]+ wall=\d+ bytes=(\d+) source=console\] ', raw)
+            self.assertIsNotNone(header)
+            length = int(header[1]); raw = raw[header.end():]
+            self.assertGreaterEqual(len(raw), length)
+            body += raw[:length]; raw = raw[length:]
+        self.assertEqual(body, b''.join(fragments))
+
     def test_socket_rotation_and_export(self):
         self.start()
         for i in range(12):

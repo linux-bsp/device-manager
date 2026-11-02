@@ -184,6 +184,8 @@ try {
         else await evaluate(`document.querySelector('#sol-key').value=${JSON.stringify(process.env.SOL_VIEW_TOKEN)};document.querySelector('#sol-connect').click()`);
         await until(()=>evaluate("document.querySelector('#sol-output').textContent.includes('SOL boot fixture')"),'authenticated SOL log replay');
         assert(await evaluate("document.querySelector('#sol-meta').textContent.includes('storage=persistent')"),'SOL storage metadata');
+        assert(await evaluate("!document.querySelector('#sol-output').textContent.includes('[seq=') && !document.querySelector('#sol-output').textContent.includes('[kernel]')"),'No transport prefixes in console');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('#sol-output')).whiteSpace"),'pre');
         assert(await evaluate("!document.querySelector('#sol-output script')"),'SOL log text cannot execute HTML');
         await evaluate("document.querySelector('#sol-filter').value='no-match';document.querySelector('#sol-filter').dispatchEvent(new Event('input'))");
         assert.equal(await evaluate("document.querySelector('#sol-output').textContent"),'');

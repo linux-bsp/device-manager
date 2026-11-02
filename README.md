@@ -28,14 +28,14 @@ make -C buildroot O="$PWD/output/am625" host-device-server
 make -C buildroot O="$PWD/output/am625" fwctl fwctld logctl
 ```
 
-主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread；日志工具需要 libcurl。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。
+主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread；日志工具需要 libcurl。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。`make -C ota test` 的日志格式回归使用 Node.js 18 或更新版本。
 
 ```sh
 device-server --root /path/to/feed --bind 0.0.0.0 --port 8090
 ota-cli --server http://192.168.10.246:8090 list
 ```
 
-Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出；当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。配置和验收见 [SOL 与板卡验收](docs/sol.md)。
+Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出；当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。默认日志保留串口的正文格式，不显示采集元数据前缀。配置和验收见 [SOL 与板卡验收](docs/sol.md)。
 
 ## 设备日志
 

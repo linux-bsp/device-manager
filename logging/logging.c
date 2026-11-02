@@ -111,20 +111,20 @@ static void emit(const char *stage, const void *text, size_t len)
     fd=open(p,O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC|O_NOFOLLOW,0600);
     if(fd>=0) { struct stat st; if(!flock(fd,LOCK_EX)&&!fstat(fd,&st)&&st.st_size<256*1024)(void)write_all(fd,text,len);close(fd); }
 }
-static int append_record(const char *stage, const char *data, size_t n)
+static int append_source(const char *stage, const char *data, size_t n, const char *source)
 {
     char p[PATH_CAP],old[PATH_CAP],name[64];struct stat st;
     snprintf(name,sizeof(name),"%s.log",stage);join(p,bootpath,name);
     if(!lstat(p,&st) && (!S_ISREG(st.st_mode)||st.st_nlink!=1))return -1;
-    if(!lstat(p,&st) && (size_t)st.st_size+n+100>file_limit) {
+    if(!lstat(p,&st) && (size_t)st.st_size+n+512>file_limit) {
         snprintf(name,sizeof(name),"%s.log.1",stage);join(old,bootpath,name);
         if(rename(p,old))return -1;
     }
     int fd=open(p,O_WRONLY|O_APPEND|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0600);if(fd<0)return -1;
     struct timespec mono,wall;clock_gettime(CLOCK_MONOTONIC,&mono);clock_gettime(CLOCK_REALTIME,&wall);
-    char head[128];int k=snprintf(head,sizeof(head),"[seq=%llu mono=%lld.%03ld wall=%lld] ",++sequence,(long long)mono.tv_sec,mono.tv_nsec/1000000,(long long)wall.tv_sec);
+    char head[512];int k=snprintf(head,sizeof(head),"[seq=%llu mono=%lld.%09ld wall=%lld bytes=%zu source=%s] ",++sequence,(long long)mono.tv_sec,mono.tv_nsec,(long long)wall.tv_sec,n,source);
     int ret=write_all(fd,head,(size_t)k) || write_all(fd,data,n);
-    if(!n || data[n-1]!='\n')ret|=write_all(fd,"\n",1);
+    /* Transport frames never add a newline to the original console bytes. */
     /* Critical events are durable immediately. Routine data is synced in batches. */
     if(!strcmp(stage,"events"))ret|=fdatasync(fd);
     close(fd);
@@ -133,6 +133,8 @@ static int append_record(const char *stage, const char *data, size_t n)
     }
     return ret;
 }
+static int append_record(const char *stage, const char *data, size_t n)
+{ return append_source(stage,data,n,"console"); }
 static void event(const char *s) { if(append_record("events",s,strlen(s)))perror("[logctld] [ERROR] log write"); }
 static void sync_logs(void)
 {
@@ -262,11 +264,10 @@ static void scan_services(void)
         int fd=open(p,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)continue;
         if(st.st_size-s->offset>1024*1024){s->offset=st.st_size-1024*1024;event("service backlog exceeded 1 MiB; oldest bytes omitted");}
         if(lseek(fd,s->offset,SEEK_SET)<0){close(fd);continue;}
-        char b[CHUNK],prefix[300];int k=snprintf(prefix,sizeof(prefix),"source=%s\n",s->name);int wrote=0;
+        char b[CHUNK];
         for(int batch=0;batch<32;batch++) {
             ssize_t n=read(fd,b,sizeof(b));if(n<=0)break;
-            if(!wrote){(void)append_record("services",prefix,(size_t)k);wrote=1;}
-            if(append_record("services",b,(size_t)n))break;
+            if(append_source("services",b,(size_t)n,"file"))break;
             s->offset+=n;
         }
         close(fd);

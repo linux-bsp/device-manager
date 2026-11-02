@@ -20,9 +20,9 @@
 <div id="sol-auth" class="toolbar" hidden><label for="sol-key">查看凭据</label><input id="sol-key" type="password" autocomplete="off" placeholder="输入服务端 sol-keys/viewer 中的凭据"><button id="sol-connect">连接</button><button id="sol-disconnect" class="secondary">断开</button></div>
 <div id="sol-status" role="status">未连接</div>
 <div class="toolbar"><label for="sol-device">设备</label><select id="sol-device"></select><label for="sol-boot">启动记录</label><select id="sol-boot"></select><label for="sol-stage">阶段</label><select id="sol-stage"><option value="all">全部</option><option>r5-spl</option><option>a53-spl</option><option>uboot</option><option>initramfs</option><option>kernel</option><option>services</option><option>events</option></select><button id="sol-refresh" class="secondary">刷新</button><button id="sol-export" class="secondary">导出当前视图</button></div>
-<pre id="sol-meta" class="muted"></pre><p class="muted">服务端保留每台设备最近 4 次启动，最多 2048 个日志块（约 8 MiB）。本地容量耗尽前未上传的数据可能丢失。屏幕保留最近 256 KiB；阶段时间仅供各阶段内比较。</p>
+<pre id="sol-meta" class="muted"></pre><p class="muted">服务端保留每台设备最近 4 次启动，最多 2048 个日志块（约 8 MiB）。本地容量耗尽前未上传的数据可能丢失。视图保留最近 2 MiB 正文，保留原始缩进和换行；跨来源顺序按日志时间尽力还原。</p>
 <div class="toolbar"><label for="sol-filter">筛选</label><input id="sol-filter" type="search" placeholder="筛选日志文本"><label><input id="sol-live" type="checkbox" checked> 实时跟随</label></div>
-<pre id="sol-output" tabindex="0" aria-label="设备日志" style="background:#101c2c;color:#d6e4f5;padding:18px;border-radius:8px;max-height:65vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+<pre id="sol-output" tabindex="0" aria-label="设备日志" style="background:#101c2c;color:#d6e4f5;padding:18px;border-radius:8px;max-height:65vh;overflow:auto;white-space:pre;overflow-wrap:normal;tab-size:8"></pre>
 </section>
 <div id="notice" class="notice" role="status" hidden></div>
 <section id="firmware-detail" class="card" hidden></section>
@@ -201,11 +201,12 @@ for(const [tab,list] of Object.entries(lists)){
  const empty=document.createElement('p');empty.id='empty-'+tab;empty.className='empty';empty.textContent='暂无记录或没有符合筛选条件的记录。';empty.hidden=true;wrap.after(empty);
 }
 
-const sol={active:false,token:'',rows:[],text:'',cursor:0,generation:0,busy:false,decoders:{}};
+/* SOL_CONSOLE */
+const sol={active:false,token:'',rows:[],text:'',cursor:0,generation:0,busy:false,console:new SolConsole()};
 function solDecode(text){return new TextDecoder().decode(Uint8Array.from(text,c=>c.charCodeAt(0)));}
 async function solGet(path){const r=await fetch(path,{cache:'no-store',headers:sol.token?{Authorization:'Bearer '+sol.token}:{}});const body=await r.json();if(!r.ok)throw Error(body.error||'日志请求失败');return body;}
 function solRender(){const query=$('sol-filter').value.toLowerCase();$('sol-output').textContent=query?sol.text.split('\n').filter(line=>line.toLowerCase().includes(query)).join('\n'):sol.text;if($('sol-live').checked)$('sol-output').scrollTop=$('sol-output').scrollHeight;}
-function solReset(){sol.generation++;sol.cursor=0;sol.text='';sol.decoders={};solRender();}
+function solReset(){sol.generation++;sol.cursor=0;sol.text='';sol.console=new SolConsole();solRender();}
 function solBoots(follow=false){const old=$('sol-boot').value;$('sol-boot').replaceChildren();for(const row of sol.rows.filter(r=>r.device===$('sol-device').value)){const o=document.createElement('option');o.value=row.boot;o.textContent=row.boot+(solDecode(row.meta).includes('current=yes')?'（当前）':'');$('sol-boot').append(o);}if(!follow&&[...$('sol-boot').options].some(o=>o.value===old))$('sol-boot').value=old;solReset();}
 async function solIndex(rows=null,follow=false){if(!rows)rows=await solGet('/api/sol/devices');sol.rows=rows;const old=$('sol-device').value;$('sol-device').replaceChildren();for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;solBoots(follow);if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';}
 async function solPoll(){
@@ -213,9 +214,9 @@ async function solPoll(){
  const device=$('sol-device').value,boot=$('sol-boot').value;if(!device||!boot)return;
  const generation=sol.generation;sol.busy=true;
  try{const rows=await solGet('/api/sol/logs/'+[device,boot,$('sol-stage').value,sol.cursor].map(encodeURIComponent).join('/'));if(generation!==sol.generation)return;
- for(const row of rows){sol.cursor=row.id;const decoder=sol.decoders[row.stage]||(sol.decoders[row.stage]=new TextDecoder());sol.text+='['+row.stage+'] '+decoder.decode(Uint8Array.from(row.text,c=>c.charCodeAt(0)),{stream:true});}
- if(sol.text.length>262144)sol.text='[较早内容已从视图截断]\n'+sol.text.slice(-250000);
- solRender();const info=sol.rows.find(r=>r.device===device&&r.boot===boot);if(info){$('sol-meta').textContent='来源 IP='+info.peer+'\n'+solDecode(info.meta);$('sol-status').textContent=(Date.now()-info.seen*1000>60000?'设备暂未上报 · ':'已连接 · ')+'最后上报 '+new Date(info.seen*1000).toLocaleString();}
+ for(const row of rows){sol.cursor=row.id;sol.console.push(row);}
+ sol.text=sol.console.text($('sol-stage').value);
+ solRender();const info=sol.rows.find(r=>r.device===device&&r.boot===boot);if(info){$('sol-meta').textContent='来源 IP='+info.peer+'\n'+solDecode(info.meta);$('sol-status').textContent=(Date.now()-info.seen*1000>60000?'设备暂未上报 · ':'已连接 · ')+'最后上报 '+new Date(info.seen*1000).toLocaleString()+(sol.console.truncated?' · 视图较早内容已截断':'');}
  }catch(e){$('sol-status').textContent=e.message;}finally{sol.busy=false;}
 }
 $('sol-connect').onclick=async()=>{sol.token=$('sol-key').value.trim();if(!/^[a-f0-9]{64}$/.test(sol.token)){$('sol-status').textContent='请输入 64 位查看凭据';sol.token='';sol.active=false;return;}sol.active=true;try{await solIndex();await solPoll();}catch(e){$('sol-status').textContent=e.message;}};

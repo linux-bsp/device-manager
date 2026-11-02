@@ -85,6 +85,7 @@ class SOL(unittest.TestCase):
         self.stop();self.start()
         self.assertEqual(self.push(body=b'two\n',offset=5),(200,{'next':9}))
         rows=self.logs();self.assertEqual(len(rows),2)
+        self.assertEqual([(r["gen"],r["off"]) for r in rows],[(1,0),(1,5)])
         self.assertEqual(len(self.logs(cursor=rows[0]['id'])),1)
         self.assertEqual(self.logs(stage='uboot'),[])
     def test_binary_utf8_and_literal_markup(self):

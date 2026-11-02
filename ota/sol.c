@@ -169,7 +169,7 @@ fail:
             return reply(out,400,"{\"error\":\"Invalid log query\"}");
         snprintf(canonical,sizeof(canonical),"/api/sol/logs/%s/%s/%s/%lld",device,boot,stage,offset);
         if(strcmp(path,canonical))return reply(out,400,"{\"error\":\"Invalid log query\"}");
-        s=statement("SELECT id,stage,data FROM chunks WHERE device=?1 AND boot=?2 AND (?3='all' OR stage=?3) AND id>?4 ORDER BY id LIMIT 128",device,boot,stage,offset);
+        s=statement("SELECT id,stage,data,gen,off FROM chunks WHERE device=?1 AND boot=?2 AND (?3='all' OR stage=?3) AND id>?4 ORDER BY id LIMIT 128",device,boot,stage,offset);
     }
     if(!s)return reply(out,503,"{\"error\":\"Query unavailable\"}");
     size_t size=0;FILE *f=open_memstream(out,&size);if(!f){sqlite3_finalize(s);return 500;}
@@ -183,6 +183,7 @@ fail:
             json_string(f,(const char*)sqlite3_column_text(s,4));fputs(",\"meta\":",f);json_string(f,(const char*)sqlite3_column_text(s,5));fputs("}",f);
         }else{
             fprintf(f,"{\"id\":%lld,\"stage\":",sqlite3_column_int64(s,0));json_string(f,(const char*)sqlite3_column_text(s,1));
+            fprintf(f,",\"gen\":%lld,\"off\":%lld",sqlite3_column_int64(s,3),sqlite3_column_int64(s,4));
             fputs(",\"text\":",f);json_bytes(f,(const char*)sqlite3_column_text(s,2),(size_t)sqlite3_column_bytes(s,2));fputs("}",f);
         }
     }
