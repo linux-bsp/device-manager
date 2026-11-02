@@ -28,19 +28,21 @@ make -C buildroot O="$PWD/output/am625" host-device-server
 make -C buildroot O="$PWD/output/am625" fwctl fwctld logctl
 ```
 
-主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。
+主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread；日志工具需要 libcurl。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。
 
 ```sh
 device-server --root /path/to/feed --bind 0.0.0.0 --port 8090
 ota-cli --server http://192.168.10.246:8090 list
 ```
 
-Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 目前是明确标注“尚未接入”的入口，没有网络串口服务。
+Web 使用左侧 OTA / SOL 导航。OTA 保留上传发布、升级历史、发布记录和审计标签；SOL 已提供经过凭据验证的只读日志流、历史回放、阶段筛选与导出；设备主动连接，不依赖 SSH。配置和验收见 [SOL 与板卡验收](docs/sol.md)。
 
 ## 设备日志
 
 ```sh
 logctl status
+logctl verify-storage
+logctl verify-boot
 logctl boots
 logctl show --stage kernel
 logctl show --boot previous
@@ -48,7 +50,7 @@ logctl follow --stage services
 logctl export --boot previous --output /tmp/diagnostic.tar.gz
 ```
 
-AM625 启动脚本只尝试挂载已有的 `/dev/mmcblk1p15` ext4 文件系统到 `/data`，**不会自动格式化**。可写时日志保存在 `/data/log/boots/<boot-id>/`，否则降级至 `/run/logctl/boots/` 并报告 volatile；后者重启或断电即丢失。当前工厂镜像不初始化 data 文件系统，首次部署需另行核实与配置。
+AM625 启动脚本只尝试挂载已有的 `/dev/mmcblk1p15` ext4 文件系统到 `/data`，**不会自动格式化**。可写时日志保存在 `/data/log/boots/<boot-id>/`，否则降级至 `/run/logctl/boots/` 并报告 volatile；后者重启或断电即丢失。新工厂镜像在 data 起点预建 256 MiB ext4；旧卡 OTA 不初始化该分区，首次部署仍需核实已有文件系统。
 
 每个启动记录包含阶段日志、内核原始记录、服务日志、fwctl 版本输出和内核命令行。默认保留最近 4 次启动，每阶段日志保留 2 个不超过 2 MiB 的文件；pstore 单次归档限制 1 MiB。正常日志批量同步，事件日志立即同步。目录仅 root 可读。
 

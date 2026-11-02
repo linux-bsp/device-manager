@@ -1,6 +1,7 @@
 /* Minimal host-side HTTP transport for fwctl FIT releases. */
 #define _POSIX_C_SOURCE 200809L
 #include "ota-admin.h"
+#include "sol.h"
 #include "ota-device.h"
 #include "ota-page.h"
 #include <arpa/inet.h>
@@ -183,7 +184,7 @@ static void handle_client(int client, int root)
     bool head = !strcmp(method, "HEAD");
     unsigned long long length = 0;
     bool has_length = false, forbidden = false, admin = false, expect = false;
-    const char *origin = NULL, *host = NULL, *type = NULL, *download_device = NULL;
+    const char *origin = NULL, *host = NULL, *type = NULL, *download_device = NULL, *authorization = NULL;
     struct ota_network_context network = {0};
     char *line = line_end + 2;
     while (*line) {
@@ -215,6 +216,9 @@ static void handle_client(int client, int root)
             if (has_length || errno || !*value || *number_end)
                 forbidden = true;
             has_length = true;
+        } else if (!strcasecmp(line, "Authorization")) {
+            if (authorization) forbidden = true;
+            authorization = value;
         } else if (!strcasecmp(line, "Transfer-Encoding")) {
             forbidden = true; /* Chunked upload is intentionally unsupported. */
         } else if (!strcasecmp(line, "X-OTA-Request")) {
@@ -266,6 +270,27 @@ static void handle_client(int client, int root)
     if (forbidden) {
         json_response(client, 400, "Bad Request", "{\"error\":\"Invalid request headers\"}", head);
         return;
+    }
+    if (!strncmp(path, "/api/sol/", 9)) {
+        char body[4097], *response = NULL;
+        if (length > 4096 || expect || origin || (!strcmp(method,"POST") && !has_length)) {
+            /* Browser fetch has no Origin on same-origin GET. Device POST has none. */
+            json_response(client,400,"Bad Request","{\"error\":\"Invalid SOL request\"}",head);return;
+        }
+        struct timeval short_timeout = {.tv_sec=2};
+        setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&short_timeout,sizeof(short_timeout));
+        size_t received=0;time_t deadline=time(NULL)+5;
+        while(received<length && time(NULL)<=deadline){
+            ssize_t n=recv(client,body+received,(size_t)length-received,0);
+            if(n<0&&errno==EINTR)continue;
+            if(n<=0)break;
+            received+=(size_t)n;
+        }
+        if(received!=length){json_response(client,400,"Bad Request","{\"error\":\"Incomplete log batch\"}",head);return;}
+        body[received]=0;
+        int status=sol_request(server_directory,method,path,authorization,network.peer_ip,body,received,&response);
+        json_response(client,status,status==200?"OK":"SOL Request Failed",response?response:"{}",head);
+        free(response);return;
     }
     if (!strncmp(path, "/api/policy/", 12)) {
         char device[64], extra, canonical[128], body[128]; unsigned long long publication;
@@ -556,7 +581,7 @@ static void handle_client(int client, int root)
 
 static void usage(const char *program)
 {
-    printf("Usage: %s --root RELEASE_DIR [--bind IPV4] [--port PORT]\n"
+    printf("Usage: %s --root RELEASE_DIR [--bind IPV4] [--port PORT] [--sol-open-view]\n"
            "Defaults: --bind 127.0.0.1 --port 8090\n"
            "Open / in a browser to upload and publish firmware bundles.\n"
            "CLI publishing: device-server publish --root DIR --source RELEASE_DIR "
@@ -565,6 +590,8 @@ static void usage(const char *program)
 
 int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "sol-enroll"))
+        return sol_enroll(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "publish"))
         return ota_publish(argc, argv);
     const char *directory = NULL, *bind_address = "127.0.0.1";
@@ -573,6 +600,10 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "--help")) {
             usage(argv[0]);
             return 0;
+        }
+        if (!strcmp(argv[i], "--sol-open-view")) {
+            sol_set_open_view(true);
+            continue;
         }
         if (i + 1 >= argc) {
             usage(argv[0]);

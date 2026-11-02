@@ -175,10 +175,24 @@ try {
     await until(()=>evaluate("!document.querySelector('#panel-history').hidden"),'browser back restores tab');
     await rpc('Page.navigate',{url:url+'/#sol'});
     await until(()=>evaluate("!document.querySelector('#sol-panel').hidden"),'SOL sidebar route');
-    assert(await evaluate("document.querySelector('#sol-panel').textContent.includes('尚未接入')"));
+    assert(await evaluate("document.querySelector('#sol-panel').textContent.includes('只读实时日志')"));
     await rpc('Page.reload',{});
     await until(()=>evaluate("document.querySelector('#sol-panel')&&!document.querySelector('#sol-panel').hidden"),'SOL refresh retains module');
     assert(await evaluate("document.querySelector('#overview').hidden"));
+    if(process.env.SOL_VIEW_TOKEN){
+        if(process.env.SOL_OPEN_VIEW)await until(()=>evaluate("document.querySelector('#sol-auth').hidden"),'open SOL view hides credential form');
+        else await evaluate(`document.querySelector('#sol-key').value=${JSON.stringify(process.env.SOL_VIEW_TOKEN)};document.querySelector('#sol-connect').click()`);
+        await until(()=>evaluate("document.querySelector('#sol-output').textContent.includes('SOL boot fixture')"),'authenticated SOL log replay');
+        assert(await evaluate("document.querySelector('#sol-meta').textContent.includes('storage=persistent')"),'SOL storage metadata');
+        assert(await evaluate("!document.querySelector('#sol-output script')"),'SOL log text cannot execute HTML');
+        await evaluate("document.querySelector('#sol-filter').value='no-match';document.querySelector('#sol-filter').dispatchEvent(new Event('input'))");
+        assert.equal(await evaluate("document.querySelector('#sol-output').textContent"),'');
+        await evaluate("document.querySelector('#sol-filter').value='';document.querySelector('#sol-filter').dispatchEvent(new Event('input'))");
+        await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+        assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),'SOL mobile page overflows');
+        await screenshot('sol-mobile.png');
+        await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:1000,deviceScaleFactor:1,mobile:false});
+    }
     await screenshot('sol-sidebar.png');
     await evaluate("document.querySelector('#module-ota').click()");
     await until(()=>evaluate("!document.querySelector('#overview').hidden"),'return to OTA');

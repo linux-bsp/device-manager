@@ -1,5 +1,6 @@
-/* Device Manager local logging. No network or firmware-write privileges needed. */
+/* Local collection with an isolated optional network forwarding worker. */
 #define _GNU_SOURCE
+#include "sol-forward.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -159,6 +160,33 @@ static size_t boots(struct boot *list,size_t cap)
     }
     closedir(d);qsort(list,n,sizeof(*list),boot_compare);return n;
 }
+static int verify_storage(void)
+{
+    struct statfs fs;char p[PATH_CAP],value[64];
+    if(statfs(root,&fs)||fs.f_type==0x01021994||fs.f_type==0x858458f6){
+        puts("[logctl] [WARN] storage=volatile; reboot persistence cannot be verified");return 2;
+    }
+    struct boot list[256];size_t n=boots(list,256);int previous=0;
+    for(size_t i=0;i<n;i++)if(strcmp(list[i].name,current)){
+        char dir[PATH_CAP];join(dir,root,list[i].name);join(p,dir,"storage-check");
+        if(!small_read(p,value,sizeof(value))&&!strcmp(value,list[i].name)){
+            printf("[logctl] [INFO] previous boot marker readable: %s\n",list[i].name);previous=1;break;
+        }
+    }
+    join(p,bootpath,"storage-check");if(save_text(p,current)){perror("[logctl] [ERROR] storage marker");return 1;}
+    int fd=open(bootpath,O_DIRECTORY|O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return 1;
+    int rc=fsync(fd);close(fd);if(rc)return 1;
+    printf("[logctl] [INFO] storage=persistent cross-boot=%s; current marker synced\n",previous?"verified":"pending-next-boot");return 0;
+}
+static int verify_bootlog(void)
+{
+    const char *base=getenv("LOGCTL_HANDOFF_DIR");if(!base)base="/sys/firmware/bootlog";
+    int missing=0;for(int i=0;i<3;i++){
+        char p[PATH_CAP];join(p,base,stages[i]);int fd=open(p,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);char c;
+        int ok=fd>=0&&read(fd,&c,1)==1;if(fd>=0)close(fd);
+        printf("[logctl] [%s] stage=%s handoff=%s\n",ok?"INFO":"WARN",stages[i],ok?"verified-by-kernel":"unavailable");if(!ok)missing=1;
+    }return missing;
+}
 static void prune(void)
 {
     struct boot list[256];size_t n=boots(list,256),kept=0;
@@ -284,6 +312,15 @@ static int daemon_main(int argc,char **argv)
     if(kmsg<0)event("kernel source unavailable: /dev/kmsg");
     join(p,bootpath,"imported");if(access(p,F_OK)){import_early();save_text(p,"1\n");}
     pstore_archive();prune();
+    (void)verify_storage();
+    pid_t forwarder=-1;
+    const char *sol_config=getenv("LOGCTL_SOL_CONFIG");
+    if(!sol_config)sol_config="/etc/device-manager/sol.conf";
+    if(!access(sol_config,R_OK)) {
+        forwarder=fork();
+        if(!forwarder){execl("/proc/self/exe","logctl","forward","--root",root,NULL);_exit(127);}
+        if(forwarder<0)event("SOL worker could not start; local collection continues");
+    }
     unsigned ticks=0;
     while(!stopping) {
         struct pollfd fds[2]={{sock,POLLIN,0},{kmsg,POLLIN,0}};
@@ -300,6 +337,11 @@ static int daemon_main(int argc,char **argv)
         }
         scan_services();if(child>0&&waitpid(child,NULL,WNOHANG)==child)child=0;
         if(++ticks>=20){sync_logs();ticks=0;}
+    }
+    if(forwarder>0){
+        kill(forwarder,SIGTERM);
+        for(int i=0;i<20;i++){if(waitpid(forwarder,NULL,WNOHANG)==forwarder){forwarder=-1;break;}usleep(100000);}
+        if(forwarder>0){kill(forwarder,SIGKILL);waitpid(forwarder,NULL,0);}
     }
     scan_services();event("log collector stopped");sync_logs();close(sock);if(kmsg>=0)close(kmsg);
     join(p,runtime,"socket");unlink(p);close(lock);return 0;
@@ -327,6 +369,7 @@ static int show_file(const char *path)
 }
 static int cli_main(int argc,char **argv)
 {
+    if(argc==4&&!strcmp(argv[1],"forward")&&!strcmp(argv[2],"--root")&&argv[3][0]=='/')return sol_forward(argv[3]);
     if(argc>=4&&!strcmp(argv[1],"run"))return run_command(argv[2],argv+3);
     if(argc==4&&!strcmp(argv[1],"write")){if(stage_id(argv[2])<0)return 2;emit(argv[2],argv[3],strlen(argv[3]));return 0;}
     struct boot list[256];size_t n=boots(list,256);
@@ -334,6 +377,8 @@ static int cli_main(int argc,char **argv)
         struct statfs fs;const char *mode=statfs(root,&fs)?"unavailable":fs.f_type==0x01021994||fs.f_type==0x858458f6?"volatile":"persistent";
         printf("boot=%s\nstorage=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,bootpath,KEEP_BOOTS);return 0;
     }
+    if(argc==2&&!strcmp(argv[1],"verify-storage"))return verify_storage();
+    if(argc==2&&!strcmp(argv[1],"verify-boot"))return verify_bootlog();
     if(argc==2&&!strcmp(argv[1],"boots")){for(size_t i=0;i<n;i++)printf("%llu %s%s\n",list[i].order,list[i].name,!strcmp(list[i].name,current)?" current":"");return 0;}
     if(argc<2)goto usage;
     const char *boot=current,*stage=NULL,*output=NULL;
@@ -373,7 +418,8 @@ static int cli_main(int argc,char **argv)
         execlp("tar","tar","-czf",output,"-C",root,boot,NULL);perror("tar");return 1;
     }
 usage:
-    fprintf(stderr,"Usage: logctl status | boots | show [--boot ID|previous] [--stage STAGE]\n"
+    fprintf(stderr,"Usage: logctl verify-storage | verify-boot\n"
+        "       logctl status | boots | show [--boot ID|previous] [--stage STAGE]\n"
         "       logctl follow [--boot ID|previous] [--stage STAGE]\n"
         "       logctl export [--boot ID|previous] --output /path/logs.tar.gz\n"
         "       logctl write STAGE MESSAGE | run STAGE COMMAND [ARGS...]\n");return 2;

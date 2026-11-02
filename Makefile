@@ -19,8 +19,8 @@ logctld: logctl
 	cp logging/logctl logging/logctld
 test:
 	python3 tests/test_firmware.py
-	$(MAKE) -C ota test
 	$(MAKE) -C logging test
+	$(MAKE) -C ota test
 clean:
 	$(MAKE) -C ota clean
 	$(MAKE) -C logging clean

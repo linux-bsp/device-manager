@@ -47,6 +47,20 @@ class Logging(unittest.TestCase):
     def text(self, name='services'):
         p=self.store/self.env['LOGCTL_BOOT_ID']/(name+'.log')
         return p.read_text() if p.exists() else ''
+    def test_storage_marker_and_boot_stage_checks(self):
+        self.start()
+        result=self.cli('verify-storage')
+        self.assertIn(result.returncode,(0,2))
+        if result.returncode==0:
+            marker=self.store/self.env['LOGCTL_BOOT_ID']/'storage-check'
+            self.assertEqual(marker.read_text(),self.env['LOGCTL_BOOT_ID'])
+            self.stop();self.env['LOGCTL_BOOT_ID']='test-boot-2';self.start()
+            self.assertIn('cross-boot=verified',self.cli('verify-storage').stdout)
+        handoff=self.base/'handoff';handoff.mkdir()
+        self.env['LOGCTL_HANDOFF_DIR']=str(handoff)
+        self.assertEqual(self.cli('verify-boot').returncode,1)
+        for stage in ('r5-spl','a53-spl','uboot'):(handoff/stage).write_text('verified fixture\n')
+        self.assertEqual(self.cli('verify-boot').returncode,0)
     def test_early_capture_and_exit_status(self):
         result=self.cli('run','services','/bin/sh','-c','echo early-message; exit 7')
         self.assertEqual(result.returncode,7)
