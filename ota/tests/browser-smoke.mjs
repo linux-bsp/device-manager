@@ -115,6 +115,9 @@ try {
     },'latest publication');
     await until(()=>evaluate(`document.querySelector('#current-version').textContent===${JSON.stringify(expectedTag)} && !document.querySelector('[data-publish]')`),'published UI');
     const after=await (await fetch(url+'/api/state')).json();
+    const activeRelease=after.releases.find(release=>release.published);
+    assert(activeRelease,'The API should identify the active device publication');
+    assert(await evaluate(`!document.querySelector('#published-current').hidden && document.querySelector('#published-current-version').textContent.includes(${JSON.stringify(expectedTag)}) && document.querySelector('#published-current-version').textContent.includes(${JSON.stringify(activeRelease.firmware_id.slice(0,8))})`),'Active device firmware is visible inside the publishing section');
     assert(await evaluate("document.querySelector('.upload-main').getBoundingClientRect().right < document.querySelector('.upload-sidebar').getBoundingClientRect().left"),'Upload sidebar');
     assert(await evaluate("document.querySelector('#drafts-table').closest('.card').getBoundingClientRect().width > document.querySelector('#panel-manage').getBoundingClientRect().width-2"),'Full width publishing');
     assert(await evaluate("!document.querySelector('#panel-manage').textContent.includes('01 /') && !document.querySelector('#panel-manage').textContent.includes('02 /')"));

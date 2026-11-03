@@ -27,8 +27,10 @@ async function loadState(){
  renderFleet(data);
  $('service-health').textContent='管理服务已连接';$('service-health').classList.remove('error');
  if(location.pathname==='/firmware'){renderDetails(data);return;}
- const latest=data.releases.find(r=>r.publication===data.latest);
- const current=latest?.published?latest:null;
+ // The API marks the one active publication explicitly. Resolve it from the
+ // release list so the UI still shows it if the latest pointer and list order
+ // briefly differ during a server refresh or rollback.
+ const current=data.releases.find(r=>r.published)||null;
  const held=data.latest>0&&!current;
  const currentLabel=current?(current.tag||current.firmware_version):held?'发布已暂停或记录不可用':'尚未发布';
  $('current-version').textContent=currentLabel;
@@ -38,8 +40,8 @@ async function loadState(){
  currentPanel.hidden=!current&&!held;
  $('published-current-status').textContent=current?'设备当前可获取':'发布已暂停 / 记录不可用';
  $('published-current-status').className='pill '+(current?'good':'warn');
- $('published-current-version').textContent=current?`${current.tag||current.firmware_version} · 发布 #${current.publication}`:`服务器最新发布 #${data.latest} 当前不可获取`;
- $('published-current-meta').textContent=current?`${current.product} / ${current.layout} · 固件 ID ${(current.firmware_id||'').slice(0,8)} · ${size(current.bytes)}`:'设备不会下载此版本。请检查异常审计或发布目录。';
+ $('published-current-version').textContent=current?`${current.tag||current.firmware_version} · 固件 ID ${(current.firmware_id||'').slice(0,8)}`:`服务器最新发布 #${data.latest} 当前不可获取`;
+ $('published-current-meta').textContent=current?`${current.product} / ${current.layout} · ${size(current.bytes)}`:'设备不会下载此版本。请检查异常审计或发布目录。';
  $('published-current-meta').title=current?.firmware_id||'';
  const currentLink=$('published-current-link');
  currentLink.hidden=!current;
