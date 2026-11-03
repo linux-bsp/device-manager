@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "sol.h"
+#include "sol-evidence.h"
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -73,8 +74,12 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK)return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
+}
+int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)
+{
+    return setup(root)?-1:sol_evidence_event(db,report,observed_boot);
 }
 static int authorized(const char *root,const char *device,const char *auth)
 {
@@ -149,6 +154,7 @@ int sol_request(const char *root,const char *method,const char *path,const char 
                 sqlite3_bind_int64(s,5,next);if(finish(s))goto fail;
             }else if(length)status=409; /* Lost ACK or stale client: return durable cursor. */
         }
+        if(sol_evidence_capture(db,device,boot))goto fail;
         s=statement("DELETE FROM boots WHERE device=?1 AND boot NOT IN(SELECT boot FROM boots WHERE device=?1 ORDER BY rowid DESC LIMIT 4)",device,NULL,NULL,-1);
         if(finish(s))goto fail;
         s=statement("DELETE FROM streams WHERE device=?1 AND boot=?2 AND stage=?3 AND gen NOT IN(SELECT gen FROM streams WHERE device=?1 AND boot=?2 AND stage=?3 ORDER BY gen DESC LIMIT 4)",device,boot,stage,-1);
@@ -162,6 +168,11 @@ fail:
     if(strcmp(method,"GET"))return reply(out,405,"{\"error\":\"Use GET\"}");
     if(!strcmp(path,"/api/sol/config"))return reply(out,200,open_view?"{\"open_view\":true}":"{\"open_view\":false}");
     if(!open_view&&!authorized(root,"viewer",auth))return reply(out,403,"{\"error\":\"Enter the SOL viewing credential\"}");
+    if(!strncmp(path,"/api/sol/incidents/",19)){
+        int code=sol_evidence_query(db,path,out);
+        if(!*out)return reply(out,code,"{\"error\":\"Incident log evidence unavailable\"}");
+        return code;
+    }
     sqlite3_stmt *s=NULL;
     if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta FROM boots ORDER BY device,rowid DESC",NULL,NULL,NULL,-1);
     else {

@@ -80,6 +80,73 @@ async function loadState(){
  controls();
 }
 
+const diagnosticReasons={
+ 'linux-panic-observed':'检测到 Linux panic 痕迹（未确认对应哪次启动）',
+ 'linux-oops-observed':'检测到 Linux Oops 痕迹（未确认对应哪次启动）',
+ 'data-unavailable-observed':'检测到 data 挂载或存储状态不可用',
+ 'data-read-only-observed':'检测到 data 为只读',
+ 'data-low-space-observed':'检测到 data 可用空间不足',
+ 'data-unreadable-observed':'检测到 data 日志目录不可读取',
+ 'boot-failed-rolled-back':'新固件启动失败，已回滚；具体根因未确认',
+ 'transaction-interrupted':'升级事务中断；具体根因未确认',
+ 'install-command-failed':'固件安装命令失败',
+ 'not-reported':'设备未上报具体原因',none:'设备未提供额外原因'
+};
+function incidentEvidence(entry,item){
+ const details=document.createElement('details');details.className='incident-evidence';
+ const summary=document.createElement('summary');summary.textContent=`${entry.device} · ${entry.phase} · ${new Date(entry.updated*1000).toLocaleString()} · 查看原因与日志`;details.append(summary);
+ const reason=document.createElement('p');reason.textContent=diagnosticReasons[entry.reason]||entry.reason||'设备未上报具体原因';details.append(reason);
+ const pane=document.createElement('div');details.append(pane);let loaded=false;
+ const base='/api/sol/incidents/'+[entry.device,entry.publication,entry.source_boot].map(encodeURIComponent).join('/');
+ async function loadBoot(boot){
+  const decoder=new SolConsole(32*1024*1024);let cursor=0;
+  for(let i=0;i<256;i++){
+   const response=await fetch(base+'/'+encodeURIComponent(boot) +'/'+cursor,{cache:'no-store'});
+   if(!response.ok)throw new Error('无法读取归档日志，请刷新后重试。');
+   const rows=await response.json();if(!rows.length)return {text:decoder.text('all'),truncated:decoder.truncated};
+   for(const row of rows){if(row.id<=cursor)throw new Error('归档日志游标异常');cursor=row.id;decoder.push(row);}
+  }
+  throw new Error('日志分页超过读取上限，请联系维护人员导出。');
+ }
+ details.ontoggle=async()=>{
+  if(!details.open||loaded)return;loaded=true;pane.textContent='正在读取诊断记录…';
+  try{
+   const response=await fetch(base,{cache:'no-store'});
+   if(response.status===404){pane.textContent='此事件尚无关联日志。旧记录或未到达采集阶段的启动可能只有原因记录。';return;}
+   if(!response.ok)throw new Error('诊断记录暂时不可用，请重试。');
+   const evidence=await response.json();pane.replaceChildren();
+   if(evidence.reason&&evidence.reason!=='none'&&evidence.reason!=='not-reported')reason.textContent=diagnosticReasons[evidence.reason]||evidence.reason;
+   const info=document.createElement('p');pane.append(info);
+   if(evidence.mode==='candidate'){
+    info.textContent='升级结果已记录，失败日志关联仍待处理；稍后刷新重试。';return;
+   }
+   if(evidence.mode==='reason-only'){
+    info.textContent='仅上报原因：'+(diagnosticReasons[evidence.reason]||evidence.reason||'未知')+'。不附带日志；未确认的故障阶段不作推断。观察记录启动：'+(evidence.observed_boot||'未知');return;
+   }
+   info.textContent='保留服务器已接收的日志片段，未确认完整。'+(evidence.truncated?'已达到归档上限，存在缺失。':'尚未上传的片段可继续补入。');
+   for(const boot of evidence.boots){
+    const row=document.createElement('div');row.className='incident-boot';
+    const label=document.createElement('span');label.textContent=`${boot.role==='target'?'升级后启动':'升级执行阶段'} · ${boot.boot} · ${size(boot.bytes)}`;row.append(label);
+    if(!boot.bytes){const waiting=document.createElement('small');waiting.textContent='等待日志上传，或该启动未保存可用日志';row.append(waiting);pane.append(row);continue;}
+    const view=document.createElement('button');view.className='secondary';view.textContent='查看日志';
+    const download=document.createElement('button');download.className='secondary';download.textContent='下载日志';
+    const output=document.createElement('pre');output.className='incident-console';output.hidden=true;
+    const status=document.createElement('small');
+    async function read(save){
+     view.disabled=download.disabled=true;status.textContent='正在读取…';
+     try{
+      const log=await loadBoot(boot.boot);
+      status.textContent=log.truncated?'日志存在缺口或未完成的记录':'已加载服务器保存的片段，完整性未确认';
+      if(save){const url=URL.createObjectURL(new Blob([log.text],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`ota-failure-${entry.device}-${(item.firmware_id||'unknown').slice(0,8)}-${boot.boot}.log`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      else {output.textContent=log.text;output.hidden=false;}
+     }catch(error){status.textContent=error.message;}finally{view.disabled=download.disabled=false;}
+    }
+    view.onclick=()=>read(false);download.onclick=()=>read(true);row.append(view,download,status,output);pane.append(row);
+   }
+  }catch(error){pane.textContent=error.message;loaded=false;}
+ };
+ return details;
+}
 function renderDetails(data){
  $('overview').hidden=true;
  const pane=$('firmware-detail');pane.hidden=false;pane.replaceChildren();
@@ -113,7 +180,7 @@ function renderDetails(data){
  const note=document.createElement('p');note.className='muted';note.textContent='统计按相同内容哈希汇总。下载按 rootfs.itb 完整响应计次，重试和恢复下载会再次计数；不代表安装成功。未携带设备 ID 的请求单列，旧版本启用统计前的下载无法追溯。升级结果按每次升级事务最终状态计数，成功必须经过重启健康确认。';pane.append(note);
  const heading=document.createElement('h2');heading.textContent='失败与设备异常原因';pane.append(heading);
  const errors=failures.concat(incidents).sort((a,b)=>b.updated-a.updated);
- for(const entry of errors){const line=document.createElement('p');line.textContent=`#${entry.publication} · ${entry.device} · ${entry.phase} · ${entry.reason||'原因未上报'} · ${new Date(entry.updated*1000).toLocaleString()}`;pane.append(line);}
+ for(const entry of errors)pane.append(incidentEvidence(entry,item));
  if(!errors.length){const line=document.createElement('p');line.textContent='暂无失败或设备异常记录。';pane.append(line);}
  const candidate=data.drafts.find(x=>x.firmware_id===item.firmware_id&&x.valid);
  if(!item.valid)pane.append(invalidButton());

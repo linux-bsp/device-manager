@@ -78,4 +78,6 @@ SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` �
 
 配置路径为 `/etc/device-manager/firmware.conf`。固件 tag 固定 `v0.0.1`，内容变化更新 SHA256；完整哈希用于验证和审计，普通日志显示前 8 位。发布后的设备健康确认才表示升级成功。
 
+失败记录可关联已采集的启动日志，在固件详情的“失败与设备异常原因”中查看和下载。Linux/data 异常只上报检测到的原因，不附日志。范围、启动关联与接口见 [失败诊断与日志证据](docs/incident-evidence.md)。
+
 执行 `make -C logging test` 验证日志生命周期；`python3 tests/test_firmware.py` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。

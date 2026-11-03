@@ -129,6 +129,12 @@ progress { width: 100%; height: 8px; margin-top: 15px; accent-color: var(--accen
 #file-info { overflow-wrap: anywhere; }
 #firmware-detail { max-width: 1100px; margin-left: auto; margin-right: auto; }
 #firmware-detail table { white-space: normal; }
+.incident-evidence { margin: 12px 0; padding: 13px; border: 1px solid var(--line); border-radius: 8px; }
+.incident-evidence summary { cursor: pointer; font-weight: 650; overflow-wrap: anywhere; }
+.incident-boot { margin: 10px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.incident-boot span { flex: 1 1 100%; overflow-wrap: anywhere; }
+.incident-boot small { display: block; flex: 1 1 100%; color: var(--muted); }
+.incident-console { width: 100%; min-width: 0; max-height: 420px; overflow: auto; white-space: pre; background: #101e2a; color: #dbe8e8; padding: 14px; border-radius: 7px; }
 a.download { display: inline-block; margin: 8px 13px 10px 0; font-weight: 650; }
 #sol-status { display: inline-flex; padding: 5px 10px; border-radius: 999px; background: #e8f1f5; font-size: 12px; }
 #sol-meta { white-space: pre-wrap; overflow-wrap: anywhere; }

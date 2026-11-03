@@ -4,6 +4,7 @@
 #include "http.h"
 #include "ota-admin.h"
 #include "sol-route.h"
+#include "sol.h"
 #include "ota-device.h"
 #include "ota-page.h"
 #include <errno.h>
@@ -184,6 +185,11 @@ void server_route_client(int client, const struct server_context *context)
             http_text(client, 400, "Bad Request", "Invalid device ID\n", head);
         } else if (!strcmp(method, "GET") || head) {
             int rc = ota_device_read(context->directory, id, body);
+            if(!rc){
+                struct ota_report report;
+                if(!ota_report_parse(body,&report)&&ota_report_incident(&report)&&sol_ota_event(context->directory,&report,NULL))
+                    fprintf(stderr,"[device-server] [WARN] Incident evidence reconciliation remains pending for %s/%llu\n",report.device,report.publication);
+            }
             http_text(client, rc == 1 ? 204 : rc ? 500 : 200,
                 rc == 1 ? "No Content" : rc ? "Read Failed" : "OK", rc ? "" : body, head);
         } else if (!strcmp(method, "POST")) {
@@ -206,7 +212,11 @@ void server_route_client(int client, const struct server_context *context)
             else if (ota_catalog_request(context->directory, id, report.publication, report.boot, report.phase, &network) ||
                      ota_device_write(context->directory, &report))
                 http_text(client, 500, "Write Failed", "Report not saved\n", false);
-            else http_text(client, 200, "OK", "ok\n", false);
+            else {
+                if(sol_ota_event(context->directory,&report,request.boot))
+                    fprintf(stderr,"[device-server] [ERROR] Cannot archive OTA log evidence for %s/%llu; upgrade result remains recorded\n",report.device,report.publication);
+                http_text(client, 200, "OK", "ok\n", false);
+            }
         } else http_text(client, 405, "Method Not Allowed", "Use GET or POST\n", false);
         return;
     }

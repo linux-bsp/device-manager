@@ -4,6 +4,7 @@
 #include "ota-device.h"
 #include "fwctld-log.h"
 #include "fwctld-network.h"
+#include "fwctld-diagnostics.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,6 +140,7 @@ static int read_report(const char *server, const char *device, const char *produ
 static int report(const char *server, struct ota_report *r, const char *phase, unsigned running)
 {
     char relative[128], url[OTA_PATH], text[OTA_REPORT_SIZE], response[64];
+    char previous_reason[64];snprintf(previous_reason,sizeof(previous_reason),"%s",r->reason);
     if (strcmp(r->phase, phase)) {
         const char *reason = !strcmp(phase, "rolled-back") ? "boot-failed-rolled-back" :
             !strcmp(phase, "interrupted") ? "transaction-interrupted" :
@@ -146,6 +148,15 @@ static int report(const char *server, struct ota_report *r, const char *phase, u
         snprintf(r->reason, sizeof(r->reason), "%s", reason);
     }
     if (phase != r->phase) snprintf(r->phase, sizeof(r->phase), "%s", phase);
+    if(ota_report_incident(r)||!strcmp(phase,"boot-testing")){
+        char observed[64];
+        int changed_boot=!boot_id(observed)&&strcmp(observed,r->boot);
+        int boot_failure=!strcmp(phase,"rolled-back")||!strcmp(phase,"interrupted");
+        fwctld_observe_failure(r->reason,changed_boot&&boot_failure);
+        if(ota_report_incident(r)&&strncmp(r->reason,"data-",5)&&strncmp(r->reason,"linux-",6)&&
+           (!strncmp(previous_reason,"data-",5)||!strncmp(previous_reason,"linux-",6)))
+            snprintf(r->reason,sizeof(r->reason),"%s",previous_reason);
+    }
     r->running = running;
     snprintf(relative, sizeof(relative), "api/devices/%s", r->device);
     if (ota_report_format(text, r) || ota_path(url, server, relative)) return -1;
