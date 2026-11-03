@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "sol.h"
 #include "sol-evidence.h"
+#include "sol-startup.h"
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -74,7 +75,7 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db))return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
 }
 int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)
@@ -123,6 +124,12 @@ int sol_request(const char *root,const char *method,const char *path,const char 
     if(setup(root))return reply(out,503,"{\"error\":\"SOL storage unavailable\"}");
     char device[64],boot[64],stage[64],canonical[512],extra;
     long long order,gen,offset;
+    if(!strncmp(path,"/api/sol/startup/",17)) {
+        if(sscanf(path,"/api/sol/startup/%63[^/]/",device)!=1||!identifier(device)||!strcmp(device,"viewer"))
+            return reply(out,400,"{\"error\":\"Invalid startup device\"}");
+        if(!debug_no_auth&&!authorized(root,device,auth))return reply(out,403,"{\"error\":\"Device credential rejected\"}");
+        return sol_startup_request(db,method,path,peer,body,length,out);
+    }
     if(!strncmp(path,"/api/sol/push/",14)) {
         if(strcmp(method,"POST")||sscanf(path,"/api/sol/push/%63[^/]/%63[^/]/%lld/%63[^/]/%lld/%lld%c",device,boot,&order,stage,&gen,&offset,&extra)!=6||
            !identifier(device)||!strcmp(device,"viewer")||!identifier(boot)||order<1||gen<0||offset<0||offset>4*1024*1024||length>4096)
@@ -173,14 +180,20 @@ fail:
         if(!*out)return reply(out,code,"{\"error\":\"Incident log evidence unavailable\"}");
         return code;
     }
-    sqlite3_stmt *s=NULL;
-    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta FROM boots ORDER BY device,rowid DESC",NULL,NULL,NULL,-1);
+    sqlite3_stmt *s=NULL;gen=0;
+    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta FROM (SELECT device,boot,ord,seen,peer,meta,0 archived FROM boots UNION ALL SELECT device,boot,0,seen,peer,meta,1 FROM startup_boots WHERE committed=1) ORDER BY device,archived,ord DESC,seen DESC",NULL,NULL,NULL,-1);
     else {
         if(sscanf(path,"/api/sol/logs/%63[^/]/%63[^/]/%63[^/]/%lld%c",device,boot,stage,&offset,&extra)!=4||!identifier(device)||!identifier(boot)||(!stage_valid(stage)&&strcmp(stage,"all"))||offset<0)
             return reply(out,400,"{\"error\":\"Invalid log query\"}");
         snprintf(canonical,sizeof(canonical),"/api/sol/logs/%s/%s/%s/%lld",device,boot,stage,offset);
         if(strcmp(path,canonical))return reply(out,400,"{\"error\":\"Invalid log query\"}");
-        s=statement("SELECT id,stage,data,gen,off FROM chunks WHERE device=?1 AND boot=?2 AND (?3='all' OR stage=?3) AND id>?4 ORDER BY id LIMIT 128",device,boot,stage,offset);
+        s=statement("SELECT count(*) FROM startup_boots WHERE device=?1 AND boot=?2 AND committed=1",device,boot,NULL,-1);
+        if(!s)return reply(out,503,"{\"error\":\"Query unavailable\"}");
+        int archived=sqlite3_step(s)==SQLITE_ROW&&sqlite3_column_int(s,0)>0;sqlite3_finalize(s);
+        if(archived) s=statement("SELECT CASE stage WHEN 'r5-spl' THEN 1 WHEN 'a53-spl' THEN 2 WHEN 'uboot' THEN 3 ELSE 4 END idx,stage,data,0,0 FROM startup_streams WHERE device=?1 AND boot=?2 AND (?3='all' OR stage=?3) AND CASE stage WHEN 'r5-spl' THEN 1 WHEN 'a53-spl' THEN 2 WHEN 'uboot' THEN 3 ELSE 4 END>?4 ORDER BY idx",device,boot,stage,offset);
+        else s=statement("SELECT id,stage,data,gen,off FROM chunks WHERE device=?1 AND boot=?2 AND (?3='all' OR stage=?3) AND id>?4 ORDER BY id LIMIT 128",device,boot,stage,offset);
+        /* Query type survives below without coupling archived/live cursors. */
+        gen=archived;
     }
     if(!s)return reply(out,503,"{\"error\":\"Query unavailable\"}");
     size_t size=0;FILE *f=open_memstream(out,&size);if(!f){sqlite3_finalize(s);return 500;}
@@ -193,7 +206,7 @@ fail:
             fprintf(f,",\"order\":%lld,\"seen\":%lld,\"peer\":",sqlite3_column_int64(s,2),sqlite3_column_int64(s,3));
             json_string(f,(const char*)sqlite3_column_text(s,4));fputs(",\"meta\":",f);json_string(f,(const char*)sqlite3_column_text(s,5));fputs("}",f);
         }else{
-            fprintf(f,"{\"id\":%lld,\"stage\":",sqlite3_column_int64(s,0));json_string(f,(const char*)sqlite3_column_text(s,1));
+            fprintf(f,"{\"raw\":%s,\"id\":%lld,\"stage\":",gen?"true":"false",sqlite3_column_int64(s,0));json_string(f,(const char*)sqlite3_column_text(s,1));
             fprintf(f,",\"gen\":%lld,\"off\":%lld",sqlite3_column_int64(s,3),sqlite3_column_int64(s,4));
             fputs(",\"text\":",f);json_bytes(f,(const char*)sqlite3_column_text(s,2),(size_t)sqlite3_column_bytes(s,2));fputs("}",f);
         }

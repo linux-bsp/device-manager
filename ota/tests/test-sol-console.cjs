@@ -67,3 +67,11 @@ test('imported initramfs block cannot split an early rcS partial line', () => {
     push(view,'initramfs',frame(2,7.1,'[fw-init] [INFO] switch_root\n'));
     assert.equal(view.text(),'[fw-init] [INFO] switch_root\n=== Starting rcS ===\nStarting CAN: OK\n');
 });
+
+test('raw startup archives preserve serial bytes and stage order', () => {
+    const c = new SolConsole();
+    c.push({id: 4, stage: 'kernel', raw: true, text: '[    0.000000] Linux\r\n'});
+    c.push({id: 1, stage: 'r5-spl', raw: true, text: 'SPL\r\n'});
+    c.push({id: 3, stage: 'uboot', raw: true, text: 'U-Boot\n'});
+    assert.equal(c.text(), 'SPL\nU-Boot\n[    0.000000] Linux\n');
+});

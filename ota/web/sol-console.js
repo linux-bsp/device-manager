@@ -9,6 +9,10 @@ class SolConsole {
         this.truncated = false;
     }
     push(row) {
+        if (row.raw) {
+            this.save({stage: row.stage, frame: {seq: row.id, time: row.id, length: row.text.length}}, row.text);
+            return;
+        }
         const key = row.stage + '/' + (row.gen ?? 0);
         let stream = this.streams.get(key);
         if (!stream) {

@@ -37,6 +37,8 @@ test: all
 	python3 ./tests/test-log-stop.py
 	python3 ./tests/test-cli.py
 	python3 ./tests/test-sol.py
+	python3 ./tests/test-startup.py
+	python3 ./tests/test-boot-health.py
 	python3 ./tests/test-incident-evidence.py
 	python3 ./tests/test-diagnostics.py
 

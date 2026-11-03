@@ -4,8 +4,8 @@ CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
 .PHONY: all test clean
 all: logctl logctld
-logctl: logging.c sol-forward.c sol-forward.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) logging.c sol-forward.c $(LDFLAGS) $(LDLIBS) -o $@
+logctl: logging.c sol-forward.c sol-forward.h startup-forward.c startup-forward.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) logging.c sol-forward.c startup-forward.c $(LDFLAGS) $(LDLIBS) -o $@
 logctld: logctl
 	cp logctl logctld
 test: all

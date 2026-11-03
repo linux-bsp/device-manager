@@ -1,6 +1,7 @@
 /* Independent retrying uploader: local collection never waits for the network. */
 #define _GNU_SOURCE
 #include "sol-forward.h"
+#include "startup-forward.h"
 #include <curl/curl.h>
 #include <dirent.h>
 #include <errno.h>
@@ -62,11 +63,9 @@ static size_t receive(char *p,size_t a,size_t b,void *opaque)
     memcpy(r->b+r->n,p,n);r->n+=n;r->b[r->n]=0;return n;
 }
 static int progress(void *p,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d){(void)p;(void)a;(void)b;(void)c;(void)d;return stopped?1:0;}
-static int post(const char *boot,long long order,const char *stage,long long gen,long long off,const char *data,size_t length,long long *next)
+static int post_url(const char *url,const char *data,size_t length,long long *next)
 {
-    char url[P],auth[96];
-    int k=snprintf(url,sizeof(url),"%s/api/sol/push/%s/%s/%lld/%s/%lld/%lld",server,device,boot,order,stage,gen,off);
-    if(k<0||k>=(int)sizeof(url))return -1;
+    char auth[96];
     CURL *c=curl_easy_init();if(!c)return -1;
     snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);
     struct curl_slist *h=NULL;if(*key)h=curl_slist_append(h,auth);h=curl_slist_append(h,"Content-Type: application/octet-stream");h=curl_slist_append(h,"Expect:");
@@ -83,6 +82,16 @@ static int post(const char *boot,long long order,const char *stage,long long gen
     char extra;
     if(result!=CURLE_OK||(status!=200&&status!=409)||sscanf(r.b,"{\"next\":%lld}%c",next,&extra)!=1||*next<0||*next>4*1024*1024)return -1;
     return 0;
+}
+static int post_path(const char *path,const char *data,size_t length,long long *next)
+{
+    char url[P];int k=snprintf(url,sizeof(url),"%s%s",server,path);
+    return k<0||k>=(int)sizeof(url)?-1:post_url(url,data,length,next);
+}
+static int post(const char *boot,long long order,const char *stage,long long gen,long long off,const char *data,size_t length,long long *next)
+{
+    char path[512];int k=snprintf(path,sizeof(path),"/api/sol/push/%s/%s/%lld/%s/%lld/%lld",device,boot,order,stage,gen,off);
+    return k<0||k>=(int)sizeof(path)?-1:post_path(path,data,length,next);
 }
 static int upload_file(const char *path,const char *boot,long long order,const char *stage)
 {
@@ -156,7 +165,9 @@ int sol_forward(const char *root)
     signal(SIGTERM,stop_forward);signal(SIGINT,stop_forward);signal(SIGPIPE,SIG_IGN);
     curl_global_init(CURL_GLOBAL_DEFAULT);int state=-1;
     while(!stopped){
+        int startup=startup_forward(device,post_path);
         int result=cycle(root);
+        if(startup)result=-1;
         if(result!=state){fprintf(stderr,"[logctld] [%s] SOL %s\n",result?"WARN":"INFO",result?"unavailable; local collection continues, retrying":"connected; log forwarding active");state=result;}
         for(int i=0;i<20&&!stopped;i++)usleep(250000);
     }

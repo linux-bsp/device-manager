@@ -41,7 +41,7 @@ device-server --root /path/to/feed --bind 0.0.0.0 --port 8090
 ota-cli --server http://192.168.10.246:8090 list
 ```
 
-Web 使用总览、设备、固件 OTA、远程日志 SOL 四个入口。总览和设备页汇总真实 OTA/SOL 上报；“近五分钟上报”只是活动记录，不代表设备持续在线。OTA 内部保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出。页面资源在 `ota/web/`，构建时嵌入 host `device-server`，不依赖外部 CDN。当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。界面设计依据见 [Web 设计说明](docs/web-design.md)，配置和验收见 [SOL 与板卡验收](docs/sol.md)。
+Web 使用总览、设备、固件 OTA、远程日志 SOL 四个入口。总览和设备页汇总真实 OTA/SOL 上报；“近五分钟上报”只是活动记录，不代表设备持续在线。OTA 内部保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出。页面资源在 `ota/web/`，构建时嵌入 host `device-server`，不依赖外部 CDN。当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。界面设计依据见 [Web 设计说明](docs/web-design.md)，配置和验收见 [SOL 与板卡验收](docs/sol.md)。 AM625 双缓冲启动缓存、服务器确认后清理及保留边界见 [双缓冲启动日志](docs/startup-buffers.md)。
 
 服务端将监听、HTTP 传输、OTA 路由、SOL 路由和持久化业务分层；模块接口与扩展约束见 [架构说明](docs/architecture.md)。
 

@@ -246,6 +246,10 @@ static int verify_storage(void)
 static int verify_bootlog(void)
 {
     const char *base=getenv("LOGCTL_HANDOFF_DIR");if(!base)base="/sys/firmware/bootlog";
+    char state_path[PATH_CAP],state[128];join(state_path,base,"state");
+    if(!small_read(state_path,state,sizeof(state))&&!strcmp(state,"startup-state=acknowledged")){
+        puts("[logctl] [INFO] startup logs archived; both RAM buffers acknowledged");return 0;
+    }
     int missing=0;for(int i=0;i<3;i++){
         char p[PATH_CAP];join(p,base,stages[i]);int fd=open(p,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);char c;
         int ok=fd>=0&&read(fd,&c,1)==1;if(fd>=0)close(fd);
@@ -285,7 +289,7 @@ static void import_early(void)
     }
     for(int i=0;i<3;i++) {
         snprintf(p,sizeof(p),"/sys/firmware/bootlog/%s",stages[i]);
-        if(import_file(p,stages[i],16384))event("bootloader log unavailable for this stage (requires updated bootloader and kernel handoff)");
+        if(import_file(p,stages[i],65536))event("bootloader log unavailable for this stage (requires updated bootloader and kernel handoff)");
     }
     (void)import_file("/run/logctl-initramfs.log","initramfs",256*1024);
 }
@@ -447,6 +451,8 @@ static int cli_main(int argc,char **argv)
         printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,state,bootpath,KEEP_BOOTS);
         char status[PATH_CAP];join(status,runtime,"sync-status");
         if(access(status,F_OK))puts("sync-state=unknown");else if(show_file(status))return 1;
+        const char *handoff=getenv("LOGCTL_HANDOFF_DIR");if(!handoff)handoff="/sys/firmware/bootlog";
+        join(status,handoff,"state");if(!access(status,R_OK)&&(show_file(status)))return 1;
         return 0;
     }
     if(argc==2&&!strcmp(argv[1],"verify-storage"))return verify_storage();
