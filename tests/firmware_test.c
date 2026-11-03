@@ -21,9 +21,9 @@ int fw_update_release(const struct fw_layout *layout, struct fw_storage *storage
     return -ENOTSUP;
 }
 int fw_restore_rootfs(const struct fw_layout *l, struct fw_storage *s, uint32_t d,
-    const char *p, uint64_t n, const uint8_t h[32])
+    const char *p, uint64_t n, const uint8_t h[32], bool allow_unselected)
 {
-    (void)l; (void)s; (void)d; (void)p; (void)n; (void)h; return -ENOTSUP;
+    (void)l; (void)s; (void)d; (void)p; (void)n; (void)h; (void)allow_unselected; return -ENOTSUP;
 }
 int fw_validate_recovery_kernel(const struct fw_layout *l, struct fw_storage *s,
     const struct fw_metadata *m, uint32_t d)

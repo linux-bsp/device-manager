@@ -12,6 +12,7 @@
 
 struct fw_snapshot {
     unsigned booted, active, pending, version[2], good[2], state[2];
+    char identity[2][65];
 };
 static int reboot_requested;
 
@@ -20,13 +21,20 @@ static int snapshot(struct fw_snapshot *s)
     char text[512], extra;
     char *args[] = {"fwctl", "ota-status", NULL};
     if (ota_run(args, text, sizeof(text)) || sscanf(text,
-        "FWOTA1 %u %u %u %u %u %u %u %u %u %c", &s->booted, &s->active, &s->pending,
-        &s->version[0], &s->good[0], &s->state[0], &s->version[1], &s->good[1], &s->state[1], &extra) != 9 ||
+        "FWOTA2 %u %u %u %u %u %u %64s %u %u %u %64s %c", &s->booted, &s->active, &s->pending,
+        &s->version[0], &s->good[0], &s->state[0], s->identity[0],
+        &s->version[1], &s->good[1], &s->state[1], s->identity[1], &extra) != 11 ||
         s->booted > 1 || s->active > 1 || (s->pending > 1 && s->pending != 255) ||
         s->good[0] > 1 || s->good[1] > 1 || s->state[0] > 5 || s->state[1] > 5) {
         fwctld_error("Cannot read valid local firmware status (fwctl ota-status)");
         return -1;
     }
+    for (unsigned i = 0; i < 2; i++)
+        if (strcmp(s->identity[i], "-") &&
+            (strlen(s->identity[i]) != 64 || strspn(s->identity[i], "0123456789abcdef") != 64)) {
+            fwctld_error("Invalid firmware identity in local status");
+            return -1;
+        }
     return 0;
 }
 
@@ -48,16 +56,28 @@ static int get(const char *url, char *text, unsigned size)
     return fwctld_request(args, text, size);
 }
 
-int fwctld_release_label(const char *server, unsigned long long publication, char label[128])
+int fwctld_release_identity(const char *server, unsigned long long publication,
+                            char tag[32], char hash[65])
 {
-    char relative[128], url[OTA_PATH], text[192], tag[32], hash[65], extra;
+    char relative[128], url[OTA_PATH], text[192], parsed_tag[32], parsed_hash[65], extra;
     unsigned long long number;
     snprintf(relative, sizeof(relative), "releases/%llu/version", publication);
     if (ota_path(url, server, relative) || get(url, text, sizeof(text)) ||
-        sscanf(text, "BSPOTAVERSION1 %llu %31s %64s %c", &number, tag, hash, &extra) != 3 ||
-        number != publication || tag[0] != 'v' || strspn(tag + 1, "0123456789.") != strlen(tag + 1) ||
-        strlen(hash) != 64 || strspn(hash, "0123456789abcdef") != 64) return -1;
-    snprintf(label, 128, "%s / %.8s", tag, hash); return 0;
+        sscanf(text, "BSPOTAVERSION1 %llu %31s %64s %c", &number, parsed_tag, parsed_hash, &extra) != 3 ||
+        number != publication || parsed_tag[0] != 'v' ||
+        strspn(parsed_tag + 1, "0123456789.") != strlen(parsed_tag + 1) ||
+        strlen(parsed_hash) != 64 || strspn(parsed_hash, "0123456789abcdef") != 64) return -1;
+    strcpy(tag, parsed_tag);
+    strcpy(hash, parsed_hash);
+    return 0;
+}
+
+int fwctld_release_label(const char *server, unsigned long long publication, char label[128])
+{
+    char tag[32], hash[65];
+    if (fwctld_release_identity(server, publication, tag, hash)) return -1;
+    snprintf(label, 128, "%s / %.8s", tag, hash);
+    return 0;
 }
 
 int fwctld_retry_blocked(const char *server, const char *device, unsigned long long publication)
@@ -165,22 +185,29 @@ int fwctld_auto_reconcile(const char *server, const char *device, const char *pr
 {
     struct ota_report r;
     struct fw_snapshot s;
-    char boot[64] = "";
+    char boot[64] = "", tag[32], expected_id[65];
     if (read_report(server, device, product, layout, &r) || snapshot(&s) || boot_id(boot)) return -1;
     if (!r.publication) return s.pending != 255 || !s.good[s.booted] ? 1 : 0;
     int in_progress = !strcmp(r.phase, "installing") || !strcmp(r.phase, "rebooting") ||
                       !strcmp(r.phase, "boot-testing");
     if (!in_progress) return s.pending != 255 || !s.good[s.booted] ? 1 : 0;
-    if (s.booted == r.target && s.version[s.booted] == r.version) {
+    if (fwctld_release_identity(server, r.publication, tag, expected_id)) {
+        fwctld_error("Cannot read target firmware tag and identity for transaction reconciliation");
+        return -1;
+    }
+    if (s.booted == r.target && s.version[s.booted] == r.version &&
+        !strcmp(s.identity[s.booted], expected_id)) {
         if (s.good[s.booted] && s.state[s.booted] == 4)
             return report(server, &r, "success", s.version[s.booted]) ? -1 : 0;
         if (strcmp(r.phase, "boot-testing") && report(server, &r, "boot-testing", s.version[s.booted])) return -1;
         return 1; /* S99fw-mark-good and the existing watchdog own health policy. */
     }
     if (!strcmp(boot, r.boot) && s.pending == r.target &&
-        s.version[r.target] == r.version && s.state[r.target] == 2)
+        s.version[r.target] == r.version && !strcmp(s.identity[r.target], expected_id) &&
+        s.state[r.target] == 2)
         return reboot_device(server, &r, &s);
-    if (strcmp(boot, r.boot) && s.pending == r.target && s.version[r.target] == r.version)
+    if (strcmp(boot, r.boot) && s.pending == r.target && s.version[r.target] == r.version &&
+        !strcmp(s.identity[r.target], expected_id))
         return 1; /* Boot-once or another boot path: do not claim rollback yet. */
     return report(server, &r, s.state[r.target] == 5 ? "rolled-back" : "interrupted",
         s.version[s.booted]) ? -1 : 0;
@@ -193,6 +220,7 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
     struct ota_report old, r = {0};
     struct release release;
     char path[OTA_PATH], relative[128], url[OTA_PATH], info[128], boot[64] = "", extra;
+    char expected_tag[32], expected_id[65];
     unsigned long long publication;
     unsigned version;
     if (snapshot(&s) || boot_id(boot) || read_report(server, device, product, layout, &old) ||
@@ -213,6 +241,7 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
     if (ota_path(path, cache, relative)) return -1;
     char label[128];
     if (fwctld_release_label(server, publication, label)) return -1;
+    if (fwctld_release_identity(server, publication, expected_tag, expected_id)) return -1;
     fwctld_log("Preparing installation: v%u.%u.%u -> %s, deployment %u",
         floor >> 16, (floor >> 8) & 255, floor & 255, label, r.target);
     if (report(server, &r, "installing", s.version[s.booted])) return -1;
@@ -221,7 +250,8 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
     int update_rc = fwctld_run_logged(args);
     int status_rc = snapshot(&s);
     if (update_rc || status_rc || s.pending != r.target ||
-        s.version[r.target] != version || s.state[r.target] != 2) {
+        s.version[r.target] != version || strcmp(s.identity[r.target], expected_id) ||
+        s.state[r.target] != 2) {
         int device_error = update_rc < 0 || update_rc == EIO || update_rc == ENOSPC ||
             update_rc == ENODEV || update_rc == ENOMEM || update_rc == EBUSY || status_rc;
         snprintf(r.phase, sizeof(r.phase), "%s", device_error ? "device-error" : "install-failed");

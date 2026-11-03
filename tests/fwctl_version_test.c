@@ -70,6 +70,11 @@ int32_t dm_fw_get_identity(dm_fw_handle_t h, uint32_t d, char tag[32], char id[6
     strcpy(tag, "v1.0.0"); strcpy(id, identity_id);
     return 0;
 }
+int32_t dm_fw_get_rootfs_recovery_identity(dm_fw_handle_t h, uint32_t d, uint32_t *slot,
+    uint32_t *version, char id[65], uint64_t *bytes, uint8_t digest[32])
+{ (void)h; (void)d; (void)slot; (void)version; (void)id; (void)bytes; (void)digest; return -ENOSYS; }
+int32_t dm_fw_check_rootfs(dm_fw_handle_t h, uint32_t d, int *matches)
+{ (void)h; (void)d; (void)matches; return -ENOSYS; }
 int32_t dm_fw_get_status(dm_fw_handle_t handle, struct dm_fw_status *status)
 {
     assert(handle == 7);
@@ -114,6 +119,8 @@ int32_t dm_fw_mark_bad(dm_fw_handle_t h, uint32_t deployment)
 int32_t dm_fw_recovery_fallback(dm_fw_handle_t h, uint32_t d)
 { (void)h; (void)d; return -ENOSYS; }
 int32_t dm_fw_restore_rootfs(dm_fw_handle_t h, uint32_t d, const char *p, uint64_t n, const uint8_t hash[32])
+{ (void)h; (void)d; (void)p; (void)n; (void)hash; return -ENOSYS; }
+int32_t dm_fw_restore_rootfs_slot(dm_fw_handle_t h, uint32_t d, const char *p, uint64_t n, const uint8_t hash[32])
 { (void)h; (void)d; (void)p; (void)n; (void)hash; return -ENOSYS; }
 int32_t dm_fw_rollback(dm_fw_handle_t h)
 {
@@ -163,10 +170,10 @@ int main(void)
     }
     tested_command = "ota-status";
     assert(!capture(text, 0));
-    assert(!strcmp(text, "FWOTA1 0 0 1 65536 1 4 65537 0 3\n"));
+    assert(!strcmp(text, "FWOTA2 0 0 1 65536 1 4 - 65537 0 3 -\n"));
     booted = 1;
     assert(!capture(text, 0));
-    assert(!strcmp(text, "FWOTA1 1 0 1 65536 1 4 65537 0 3\n"));
+    assert(!strcmp(text, "FWOTA2 1 0 1 65536 1 4 - 65537 0 3 -\n"));
     boot_error = -ENOENT;
     assert(capture(text, 0) == -ENOENT && !*text);
     boot_error = 0;

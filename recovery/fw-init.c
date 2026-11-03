@@ -23,10 +23,15 @@
 #define ROOT_LIMIT (128ULL * 1024 * 1024)
 struct identity {
     unsigned blocks, start, tree, bytes;
-    char root[65], salt[65], payload[65];
+    char root[65], salt[65], payload[65], firmware_id[65];
 };
 struct settings {
     char server[256], product[64], layout[64], interface[32], root[2][128];
+};
+struct alternate_rootfs {
+    unsigned deployment, slot, version;
+    uint64_t bytes;
+    char firmware_id[65], payload[65];
 };
 static int watchdog_fd = -1;
 static atomic_int watchdog_stop;
@@ -93,6 +98,7 @@ static int digest(const char *dir, const char *name, char value[65])
 }
 static int identity_read(const char *dir, struct identity *id)
 {
+    memset(id, 0, sizeof(*id));
     unsigned version; char algorithm[7];
     if (number(dir, "version", &version) || version != 1 ||
         property(dir, "algorithm", algorithm, sizeof(algorithm)) || memcmp(algorithm, "sha256", 7) ||
@@ -105,6 +111,12 @@ static int identity_read(const char *dir, struct identity *id)
     uint64_t level = id->blocks, tree = 0;
     while (level > 1) { level = (level + 127) / 128; tree += level; }
     return tree == id->tree && ((uint64_t)id->start + id->tree) * 4096 == id->bytes ? 0 : -1;
+}
+static int firmware_id_read(char id[65])
+{
+    if (property("/sys/firmware/devicetree/base/chosen", "fw,id", id, 65) || id[64])
+        return -1;
+    return strspn(id, "0123456789abcdef") == 64 ? 0 : -1;
 }
 static int check_root(const char *device, const struct identity *id)
 {
@@ -282,6 +294,92 @@ static void try_fallback(void)
         reboot_board();
     }
 }
+static int alternate_rootfs_identity(unsigned deployment, struct alternate_rootfs *id)
+{
+    char text[256], extra;
+    char number[8];
+    unsigned long long bytes;
+    snprintf(number, sizeof(number), "%u", deployment);
+    char *args[] = {"/usr/sbin/fwctl", "recovery", "info-slot", number, NULL};
+    if (run(args, text, sizeof(text)) ||
+        sscanf(text, "FWROOTFS1 %u %u %u %64s %llu %64s %c",
+            &id->deployment, &id->slot, &id->version, id->firmware_id,
+            &bytes, id->payload, &extra) != 6 ||
+        id->deployment != deployment || id->slot > 1 || !id->version || !bytes ||
+        strlen(id->firmware_id) != 64 || strspn(id->firmware_id, "0123456789abcdef") != 64 ||
+        strlen(id->payload) != 64 || strspn(id->payload, "0123456789abcdef") != 64)
+        return -1;
+    id->bytes = bytes;
+    return 0;
+}
+
+/* Best-effort repair the other, unmounted rootfs using its own metadata identity.
+ * This runs only after the selected rootfs is verified, so a network/server
+ * failure cannot prevent a valid deployment from booting. */
+static void repair_alternate_rootfs(const struct settings *settings,
+                                    unsigned deployment, unsigned current_slot,
+                                    int *network)
+{
+    struct alternate_rootfs id = { .deployment = deployment };
+    if (alternate_rootfs_identity(deployment, &id)) {
+        log_message("alternate rootfs has no complete version+hash identity; skipping repair");
+        return;
+    }
+    if (id.slot == current_slot) {
+        log_message("alternate deployment references the currently selected rootfs slot; refusing write");
+        return;
+    }
+    char number[8], result[64];
+    snprintf(number, sizeof(number), "%u", deployment);
+    char *check[] = {"/usr/sbin/fwctl", "recovery", "check-slot", number, NULL};
+    if (run(check, result, sizeof(result))) {
+        log_message("cannot verify alternate rootfs; continuing with selected verified rootfs");
+        return;
+    }
+    if (!strcmp(result, "FWROOTFSCHECK1 match\n")) {
+        log_message("alternate rootfs SHA256 verified; no repair needed");
+        return;
+    }
+    if (strcmp(result, "FWROOTFSCHECK1 different\n")) {
+        log_message("alternate rootfs check returned an invalid result; skipping repair");
+        return;
+    }
+    log_message("alternate rootfs is damaged; attempting exact network recovery");
+    if (!*network) {
+        char interface[sizeof(settings->interface)];
+        strcpy(interface, settings->interface);
+        char *up[] = {"/sbin/ifup", interface, NULL};
+        if (run(up, NULL, 0)) {
+            log_message("network unavailable; booting selected verified rootfs and leaving alternate damaged");
+            return;
+        }
+        *network = 1;
+    }
+    char url[768], bytes[32], limit[32];
+    snprintf(url, sizeof(url), "%s/recovery/%s/%s/rootfs/%u/%s/%s/rootfs.itb",
+        settings->server, settings->product, settings->layout,
+        id.version, id.firmware_id, id.payload);
+    snprintf(bytes, sizeof(bytes), "%llu", (unsigned long long)id.bytes);
+    snprintf(limit, sizeof(limit), "%llu", (unsigned long long)id.bytes + 1024 * 1024);
+    unlink("/tmp/recovery-alternate-rootfs.itb");
+    char *get[] = {"/usr/bin/curl", "--disable", "--fail", "--silent", "--show-error",
+        "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "10",
+        "--max-time", "900", "--speed-limit", "1024", "--speed-time", "30",
+        "--max-filesize", limit, "--output", "/tmp/recovery-alternate-rootfs.itb",
+        "--url", url, NULL};
+    if (run(get, NULL, 0)) {
+        log_message("alternate rootfs download failed; selected verified rootfs will still boot");
+        unlink("/tmp/recovery-alternate-rootfs.itb");
+        return;
+    }
+    char *restore[] = {"/usr/sbin/fwctl", "recovery", "restore-slot", number,
+        "/tmp/recovery-alternate-rootfs.itb", bytes, id.payload, NULL};
+    if (!run(restore, NULL, 0))
+        log_message("alternate rootfs restored and readback verified; deployment remains failed until health policy confirms it");
+    else
+        log_message("alternate rootfs repair failed; selected verified rootfs will still boot");
+    unlink("/tmp/recovery-alternate-rootfs.itb");
+}
 static void halt_recovery(const char *why)
 {
     fprintf(stderr, "[fwctl] [ERROR] %s\n", why);
@@ -365,7 +463,7 @@ int fwctl_recovery_main(int argc, char **argv)
         log_bytes(identity_text, strlen(identity_text)); log_bytes("\n", 1);
     }
     else log_message("firmware identity unavailable or inconsistent; inspect boot metadata");
-    int fallback_attempted=0, network=0;
+    int fallback_attempted=0, network=0, alternate_checked=0;
     for (;;) {
         log_message("checking all rootfs data and hash-tree bytes against kernel-bound SHA256");
         if (!check_root(s.root[slot],&id)) {
@@ -375,6 +473,10 @@ int fwctl_recovery_main(int argc, char **argv)
                         umount("/newroot"); dm_remove();
                         try_fallback();
                         halt_recovery("verified image lacks /sbin/init; content is not a bootable rootfs");
+                    }
+                    if (!alternate_checked) {
+                        alternate_checked = 1;
+                        repair_alternate_rootfs(&s, 1U - booted, slot, &network);
                     }
                     char message[192];
                     snprintf(message, sizeof(message),
@@ -402,8 +504,11 @@ int fwctl_recovery_main(int argc, char **argv)
             if (run(up,NULL,0)) { log_message("network not ready; retrying in 30 seconds"); sleep(30); continue; }
             network=1;
         }
+        if (!id.firmware_id[0] && firmware_id_read(id.firmware_id))
+            halt_recovery("complete version+hash identity unavailable; refusing ambiguous network recovery");
         char url[640], size[32], limit[32];
-        snprintf(url,sizeof(url),"%s/recovery/%s/%s/rootfs/%s/rootfs.itb",s.server,s.product,s.layout,id.payload);
+        snprintf(url,sizeof(url),"%s/recovery/%s/%s/rootfs/%u/%s/%s/rootfs.itb",
+            s.server,s.product,s.layout,version,id.firmware_id,id.payload);
         snprintf(size,sizeof(size),"%u",id.bytes);
         snprintf(limit,sizeof(limit),"%llu",(unsigned long long)id.bytes + 1024*1024);
         unlink("/tmp/recovery-rootfs.itb");

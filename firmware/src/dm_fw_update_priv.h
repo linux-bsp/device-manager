@@ -13,7 +13,7 @@ DM_FW_INTERNAL int fw_validate_recovery_kernel(const struct fw_layout *layout,
     struct fw_storage *storage, const struct fw_metadata *metadata, uint32_t deployment);
 DM_FW_INTERNAL int fw_restore_rootfs(const struct fw_layout *layout,
     struct fw_storage *storage, uint32_t deployment, const char *path,
-    uint64_t bytes, const uint8_t sha256[32]);
+    uint64_t bytes, const uint8_t sha256[32], bool allow_unselected);
 DM_FW_INTERNAL int fw_update_release(const struct fw_layout *layout,
                                       struct fw_storage *storage,
                                       const char *release_source,

@@ -14,7 +14,7 @@ static void usage(const char *program)
 		"Usage: %s [--config path] <command>\n"
 		"Commands:\n"
 		"  init [a|b] (no argument: initramfs PID 1)\n"
-        "  recovery [status|fallback|restore|check-root|table] ...\n"
+		"  recovery [status|fallback|restore|info-slot|check-slot|restore-slot|check-root|table] ...\n"
 		"  status\n"
 		"  version\n"
 		"  ota-status\n"
@@ -76,7 +76,9 @@ int main(int argc, char **argv)
             args[2] = argv[options.command_index + 3];
             return fwctl_recovery_main(3, args);
         }
-        if (strcmp(action, "status") && strcmp(action, "fallback") && strcmp(action, "restore")) {
+        if (strcmp(action, "status") && strcmp(action, "fallback") && strcmp(action, "restore") &&
+            strcmp(action, "info-slot") && strcmp(action, "check-slot") &&
+            strcmp(action, "restore-slot")) {
             usage(argv[0]); return 2;
         }
         char recovery_command[32];

@@ -123,6 +123,13 @@ int32_t dm_fw_check_image(dm_fw_handle_t handle, uint32_t deployment,
  * when a legacy bootloader omitted the extension. No metadata writes; may read
  * complete payloads and use a temporary file in the configured work-dir. */
 int32_t dm_fw_get_identity(dm_fw_handle_t handle, uint32_t deployment, char tag[32], char id[65]);
+/* Read the metadata-bound rootfs payload identity for either deployment. */
+int32_t dm_fw_get_rootfs_recovery_identity(dm_fw_handle_t handle, uint32_t deployment,
+						   uint32_t *slot, uint32_t *version,
+						   char firmware_id[65], uint64_t *bytes,
+						   uint8_t payload_sha256[32]);
+/* Compare a deployment's complete rootfs data/hash-tree payload to metadata. */
+int32_t dm_fw_check_rootfs(dm_fw_handle_t handle, uint32_t deployment, int *matches);
 int32_t dm_fw_get_status(dm_fw_handle_t handle, struct dm_fw_status *status);
 int32_t dm_fw_update(dm_fw_handle_t handle,
 		      const struct dm_fw_update_params *params);
@@ -135,6 +142,10 @@ int32_t dm_fw_recovery_fallback(dm_fw_handle_t handle, uint32_t failed);
  * verify readback, and preserve metadata and every other component/slot. */
 int32_t dm_fw_restore_rootfs(dm_fw_handle_t handle, uint32_t deployment,
     const char *path, uint64_t bytes, const uint8_t sha256[32]);
+/* Initramfs-only explicit repair of an unmounted, non-selected rootfs slot. */
+int32_t dm_fw_restore_rootfs_slot(dm_fw_handle_t handle, uint32_t deployment,
+				  const char *path, uint64_t bytes,
+				  const uint8_t sha256[32]);
 int32_t dm_fw_rollback(dm_fw_handle_t handle);
 int32_t dm_fw_get_booted_deployment(uint32_t *deployment);
 

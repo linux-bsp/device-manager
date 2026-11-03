@@ -268,6 +268,102 @@ int32_t dm_fw_get_identity(int handle, uint32_t deployment, char tag[32], char i
     fw_storage_close(&storage); dm_fw_handle_request_unlock(value); return ret;
 }
 
+int32_t dm_fw_get_rootfs_recovery_identity(int handle, uint32_t deployment,
+						   uint32_t *slot, uint32_t *version,
+						   char firmware_id[65], uint64_t *bytes,
+						   uint8_t payload_sha256[32])
+{
+	struct dm_fw_handle *value;
+	struct fw_storage storage = { .fd = -1 };
+	struct fw_metadata metadata;
+	int ret;
+
+	if (deployment > 1 || !slot || !version || !firmware_id || !bytes || !payload_sha256)
+		return -EINVAL;
+	ret = dm_fw_handle_request_lock(handle, &value);
+	if (ret)
+		return ret;
+	ret = dm_fw_storage_open(value, false, &storage);
+	if (!ret)
+		ret = fw_metadata_load(&storage, &metadata);
+	if (!ret) {
+		const struct fw_deployment *d = &metadata.deployment[deployment];
+		const struct fw_component_slot *root = &d->component[FW_COMPONENT_ROOTFS];
+		const struct fw_identity *identity = &d->identity;
+		const struct fw_region *region = fw_layout_component_region(
+			&value->layout, FW_COMPONENT_ROOTFS, root->slot);
+		if (!identity->valid || !root->valid || !region || root->slot > 1 ||
+		    !d->release_version || root->version != d->release_version ||
+		    !identity->size[1] || identity->size[1] > region->size)
+			ret = -ENODATA;
+		else {
+			*slot = root->slot;
+			*version = d->release_version;
+			*bytes = identity->size[1];
+			memcpy(payload_sha256, identity->hash[1], 32);
+			for (unsigned i = 0; i < 32; i++)
+				snprintf(firmware_id + i * 2, 3, "%02x", identity->id[i]);
+		}
+	}
+	fw_storage_close(&storage);
+	dm_fw_handle_request_unlock(value);
+	return ret;
+}
+
+int32_t dm_fw_check_rootfs(int handle, uint32_t deployment, int *matches)
+{
+	struct dm_fw_handle *value;
+	struct fw_storage storage = { .fd = -1 };
+	struct fw_metadata metadata;
+	EVP_MD_CTX *ctx = NULL;
+	unsigned char buffer[65536], digest[32];
+	int ret;
+
+	if (deployment > 1 || !matches)
+		return -EINVAL;
+	*matches = 0;
+	ret = dm_fw_handle_request_lock(handle, &value);
+	if (ret)
+		return ret;
+	ret = dm_fw_storage_open(value, false, &storage);
+	if (!ret)
+		ret = fw_metadata_load(&storage, &metadata);
+	if (ret)
+		goto out;
+	const struct fw_deployment *d = &metadata.deployment[deployment];
+	const struct fw_component_slot *root = &d->component[FW_COMPONENT_ROOTFS];
+	const struct fw_identity *identity = &d->identity;
+	const struct fw_region *region = fw_layout_component_region(
+		&value->layout, FW_COMPONENT_ROOTFS, root->slot);
+	if (!identity->valid || !root->valid || !region || root->slot > 1 ||
+	    root->version != d->release_version || !identity->size[1] ||
+	    identity->size[1] > region->size) {
+		ret = -ENODATA;
+		goto out;
+	}
+	ctx = EVP_MD_CTX_new();
+	if (!ctx) { ret = -ENOMEM; goto out; }
+	if (!EVP_DigestInit_ex(ctx, EVP_sha256(), NULL)) { ret = -EIO; goto out; }
+	for (uint64_t offset = 0; offset < identity->size[1];) {
+		size_t count = identity->size[1] - offset > sizeof(buffer) ? sizeof(buffer) :
+			(size_t)(identity->size[1] - offset);
+		ret = fw_storage_read(&storage, region->offset + offset, buffer, count);
+		if (ret)
+			goto out;
+		if (!EVP_DigestUpdate(ctx, buffer, count)) { ret = -EIO; goto out; }
+		offset += count;
+	}
+	unsigned length;
+	if (!EVP_DigestFinal_ex(ctx, digest, &length) || length != 32) { ret = -EIO; goto out; }
+	*matches = !memcmp(digest, identity->hash[1], 32);
+	ret = 0;
+out:
+	EVP_MD_CTX_free(ctx);
+	fw_storage_close(&storage);
+	dm_fw_handle_request_unlock(value);
+	return ret;
+}
+
 /* Compare the bytes actually installed in the selected deployment. The server
  * supplies payload lengths, never partition capacities or cached-package sizes. */
 int32_t dm_fw_check_image(int handle, uint32_t deployment, uint32_t version,
@@ -404,10 +500,30 @@ int32_t dm_fw_restore_rootfs(int handle, uint32_t deployment,
     int ret = dm_fw_handle_request_lock(handle, &value);
     if (ret) return ret;
     ret = dm_fw_storage_open(value, true, &storage);
-    if (!ret) ret = fw_restore_rootfs(&value->layout, &storage, deployment, path, bytes, sha256);
+    if (!ret) ret = fw_restore_rootfs(&value->layout, &storage, deployment, path, bytes, sha256, false);
     fw_storage_close(&storage);
     dm_fw_handle_request_unlock(value);
     return ret;
+}
+
+int32_t dm_fw_restore_rootfs_slot(int handle, uint32_t deployment,
+				  const char *path, uint64_t bytes,
+				  const uint8_t sha256[32])
+{
+	struct dm_fw_handle *value;
+	struct fw_storage storage = { .fd = -1 };
+	int ret;
+	if (deployment > 1)
+		return -EINVAL;
+	ret = dm_fw_handle_request_lock(handle, &value);
+	if (ret)
+		return ret;
+	ret = dm_fw_storage_open(value, true, &storage);
+	if (!ret)
+		ret = fw_restore_rootfs(&value->layout, &storage, deployment, path, bytes, sha256, true);
+	fw_storage_close(&storage);
+	dm_fw_handle_request_unlock(value);
+	return ret;
 }
 
 int32_t dm_fw_initialize(int handle, uint32_t slot)

@@ -361,15 +361,21 @@ static int print_ota_status(const struct fwctl_options *options)
 	if (handle < 0)
 		return handle;
 	ret = dm_fw_get_status(handle, &status);
-	dm_fw_close(handle);
-	if (ret)
+	if (ret) {
+		dm_fw_close(handle);
 		return ret;
-	printf("FWOTA1 %u %u %u", booted, status.active_deployment,
+	}
+	printf("FWOTA2 %u %u %u", booted, status.active_deployment,
 	       status.pending_deployment);
-	for (unsigned int i = 0; i < DM_FW_DEPLOYMENT_COUNT; i++)
+	for (unsigned int i = 0; i < DM_FW_DEPLOYMENT_COUNT; i++) {
 		printf(" %u %u %u", status.deployment[i].release_version,
 		       status.deployment[i].successful, status.deployment[i].state);
+		char tag[32], id[65] = "-";
+		int identity_ret = dm_fw_get_identity(handle, i, tag, id);
+		printf(" %s", identity_ret ? "-" : id);
+	}
 	printf("\n");
+	dm_fw_close(handle);
 	return 0;
 }
 
@@ -416,6 +422,29 @@ static int recovery_command(dm_fw_handle_t handle, const char *command, int argc
         printf("FWRECOVERY1 %u %u %u\n", booted, root->slot, root->version);
         return 0;
     }
+    if (!strcmp(command, "recovery-info-slot") || !strcmp(command, "recovery-check-slot")) {
+        uint64_t requested;
+        if (argc != 1 || parse_u64(argv[0], &requested) || requested > 1) return -EINVAL;
+        uint32_t slot, version;
+        char id[65], hex[65];
+        uint64_t bytes;
+        uint8_t digest[32];
+        ret = dm_fw_get_rootfs_recovery_identity(handle, (uint32_t)requested,
+            &slot, &version, id, &bytes, digest);
+        if (ret) return ret;
+        if (!strcmp(command, "recovery-info-slot")) {
+            for (unsigned i = 0; i < sizeof(digest); i++)
+                snprintf(hex + i * 2, 3, "%02x", digest[i]);
+            printf("FWROOTFS1 %llu %u %u %s %llu %s\n",
+                (unsigned long long)requested, slot, version, id,
+                (unsigned long long)bytes, hex);
+            return 0;
+        }
+        int matches;
+        ret = dm_fw_check_rootfs(handle, (uint32_t)requested, &matches);
+        if (!ret) printf("FWROOTFSCHECK1 %s\n", matches ? "match" : "different");
+        return ret;
+    }
     /* In-place repair must never run from a mounted disk rootfs. */
     if (statfs("/", &fs) || (fs.f_type != RAMFS_MAGIC && fs.f_type != TMPFS_MAGIC)) return -EPERM;
     if (!strcmp(command, "recovery-fallback"))
@@ -431,6 +460,19 @@ static int recovery_command(dm_fw_handle_t handle, const char *command, int argc
             digest[i] = (uint8_t)((a-digits)*16 + b-digits);
         }
         return dm_fw_restore_rootfs(handle, booted, argv[0], bytes, digest);
+    }
+    if (!strcmp(command, "recovery-restore-slot")) {
+        uint64_t requested, bytes;
+        uint8_t digest[32];
+        const char *digits = "0123456789abcdef";
+        if (argc != 4 || parse_u64(argv[0], &requested) || requested > 1 ||
+            parse_u64(argv[2], &bytes) || !bytes || strlen(argv[3]) != 64) return -EINVAL;
+        for (unsigned i = 0; i < 32; i++) {
+            const char *a = strchr(digits, argv[3][2*i]), *b = strchr(digits, argv[3][2*i+1]);
+            if (!a || !b) return -EINVAL;
+            digest[i] = (uint8_t)((a-digits)*16 + (b-digits));
+        }
+        return dm_fw_restore_rootfs_slot(handle, (uint32_t)requested, argv[1], bytes, digest);
     }
     return -EINVAL;
 }

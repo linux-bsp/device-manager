@@ -20,7 +20,8 @@ class AutomaticOTA(unittest.TestCase):
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.snapshot = self.root / 'snapshot'
-        self.snapshot.write_text('FWOTA1 0 0 255 65536 1 4 0 0 0\n')
+        self.firmware_ids = {}
+        self.write_snapshot('FWOTA1 0 0 255 65536 1 4 0 0 0\n')
         self.calls = self.root / 'calls'
         self.fail_marker = self.root / 'fail'
         fw = self.bin / 'fwctl'
@@ -28,18 +29,42 @@ class AutomaticOTA(unittest.TestCase):
             'case "$1" in\n' +
             'ota-status) cat "$TEST_SNAPSHOT";;\n' +
             'ota-check) set -- "$2" $(cat "$TEST_SNAPSHOT"); target=$1; boot=$3; '
-            'if [ "$boot" = 0 ]; then current=$6; else current=$9; fi; '
+            'if [ "$boot" = 0 ]; then current=$6; else current=${10}; fi; '
             'if [ "$target" = "$current" ] && [ ! -e "$TEST_CORRUPT" ]; then echo "FWCHECK1 match"; else echo "FWCHECK1 different"; fi;;\n' +
             'update) echo install >> "$TEST_CALLS"; [ ! -e "$TEST_FAIL" ] || exit 1; '
-            'echo "FWOTA1 0 0 1 65536 1 4 65537 0 2" > "$TEST_SNAPSHOT";;\n' +
+            'set -- $(cat "$TEST_SNAPSHOT"); if [ "$2" = 0 ]; then '
+            'echo "FWOTA2 0 0 1 $5 $6 $7 $8 $TEST_TARGET_VERSION 0 2 $TEST_TARGET_ID" > "$TEST_SNAPSHOT"; '
+            'else echo "FWOTA2 1 1 0 $TEST_TARGET_VERSION 0 2 $TEST_TARGET_ID ${9} ${10} ${11} ${12}" > "$TEST_SNAPSHOT"; fi;;\n' +
             '*) exit 2;;\nesac\n')
         fw.chmod(0o755)
         reboot = self.bin / 'reboot'
         reboot.write_text('#!/bin/sh\necho reboot >> "$TEST_CALLS"\n')
         reboot.chmod(0o755)
         self.env = dict(admin.ENV, PATH=str(self.bin)+':'+admin.ENV['PATH'],
-            TEST_CORRUPT=str(self.root/'corrupt'), TEST_SNAPSHOT=str(self.snapshot), TEST_CALLS=str(self.calls), TEST_FAIL=str(self.fail_marker))
+            TEST_CORRUPT=str(self.root/'corrupt'), TEST_SNAPSHOT=str(self.snapshot), TEST_CALLS=str(self.calls), TEST_FAIL=str(self.fail_marker),
+            TEST_ACTIVE_ID='a'*64, TEST_TARGET_ID='b'*64, TEST_TARGET_VERSION='65537')
         self.publish(self.draft())
+
+    def write_snapshot(self, status):
+        if status.startswith('FWOTA1 '):
+            fields = status.split()
+            identities = []
+            for index, fallback in ((4, 'a'), (7, 'b')):
+                version = int(fields[index])
+                identities.append('-' if not version else self.firmware_ids.get(version, fallback*64))
+            status = 'FWOTA2 ' + ' '.join(fields[1:7] + [identities[0]] + fields[7:10] + [identities[1]]) + '\n'
+        self.snapshot.write_text(status)
+
+    def publish(self, ident):
+        status, body = super().publish(ident)
+        if status == 200:
+            publication = json.loads(body)['publication']
+            version = self.request('GET', f'/releases/{publication}/info')[1].decode().split()[2]
+            firmware_id = self.request('GET', f'/releases/{publication}/version')[1].decode().split()[3]
+            self.firmware_ids[int(version)] = firmware_id
+            self.env['TEST_TARGET_ID'] = firmware_id
+            self.env['TEST_TARGET_VERSION'] = version
+        return status, body
 
     def agent(self, ok=True, force=False):
         r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
@@ -113,12 +138,12 @@ class AutomaticOTA(unittest.TestCase):
         self.agent()
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
         self.assertEqual(self.phase(), 'rebooting')
-        self.snapshot.write_text('FWOTA1 1 0 1 65536 1 4 65537 0 3\n')
+        self.write_snapshot('FWOTA1 1 0 1 65536 1 4 65537 0 3\n')
         shutil.rmtree(self.root/'cache')
         boot_result=self.agent()
         self.assertEqual(self.phase(), 'boot-testing')
         self.assertNotIn(': boot-testing',boot_result.stdout)
-        self.snapshot.write_text('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
         self.reject_payload_requests()
         result=self.agent()
         self.assertEqual(self.phase(), 'success')
@@ -141,7 +166,7 @@ class AutomaticOTA(unittest.TestCase):
             self.assertEqual(row['peer_ip'],'127.0.0.1')
             self.assertNotEqual(row['ip'],'unknown')
             self.assertRegex(row['mac'],r'^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$')
-        self.snapshot.write_text('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
         self.agent()
         rows=self.state()['device_history'][0]['network']
         self.assertIn('success',[r['phase'] for r in rows])
@@ -173,7 +198,7 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_auto_rollback_report(self):
         self.agent()
-        self.snapshot.write_text('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
+        self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
         shutil.rmtree(self.root/'cache')
         self.agent()
         self.assertEqual(self.phase(), 'rolled-back')
@@ -193,7 +218,7 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_failed_content_globally_blocked_even_when_reuploaded(self):
         self.agent()
-        self.snapshot.write_text('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
+        self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
         self.agent()
         draft = self.draft(self.bundle(self.files))
         self.assertEqual(self.request('POST', '/api/publish/'+draft, b'', {'X-OTA-Request':'1'})[0], 409)
@@ -205,7 +230,7 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_different_content_allowed_after_failure_and_history_retained(self):
         self.agent()
-        self.snapshot.write_text('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
+        self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
         self.agent()
         self.publish(self.draft(self.bundle(self.fixture(65538))))
         fw = self.bin/'fwctl'
@@ -219,14 +244,13 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_new_publication_downloads_after_success_with_empty_cache(self):
         self.agent()
-        self.snapshot.write_text('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
         shutil.rmtree(self.root/'cache')
         self.agent()
         self.assertEqual(self.phase(),'success')
         self.assertFalse((self.root/'cache/1').exists())
         self.publish(self.draft(self.bundle(self.fixture(65538))))
         fw=self.bin/'fwctl'
-        fw.write_text(fw.read_text().replace('FWOTA1 0 0 1 65536 1 4 65537 0 2','FWOTA1 1 1 0 65538 0 2 65537 1 4'))
         self.agent()
         self.assertEqual(self.phase(),'rebooting')
         self.assertEqual(self.state()['devices'][0]['publication'],2)
@@ -234,20 +258,20 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.calls.read_text(),'install\nreboot\ninstall\nreboot\n')
 
     def test_auto_existing_version_not_installed(self):
-        self.snapshot.write_text('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
+        self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
         self.agent()
         self.assertFalse(self.state()['devices'])
         self.assertFalse((self.root/'cache/1').exists())
         self.assertFalse(self.calls.exists())
 
     def test_matching_version_corrupt_contents_reinstalled(self):
-        self.snapshot.write_text('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
+        self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
         (self.root/'corrupt').touch()
         self.agent()
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
 
     def test_force_reinstalls_matching_image_and_refreshes_cache(self):
-        self.snapshot.write_text('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
+        self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
         # Seed a corrupt payload cache to ensure forced recovery downloads again.
         cache = self.root/'cache/1'
         cache.mkdir(parents=True)
@@ -259,7 +283,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual((cache/'rootfs.itb').read_bytes(), self.files['rootfs.itb'])
 
     def test_force_cannot_overwrite_pending_deployment(self):
-        self.snapshot.write_text('FWOTA1 0 0 1 65536 1 4 65538 0 2\n')
+        self.write_snapshot('FWOTA1 0 0 1 65536 1 4 65538 0 2\n')
         self.agent(force=True)
         self.assertFalse(self.calls.exists())
 
@@ -280,7 +304,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertFalse(self.calls.exists())
 
     def test_auto_bad_snapshot_blocks_install(self):
-        self.snapshot.write_text('FWOTA1 2 0 255 65536 1 4 0 0 0\n')
+        self.write_snapshot('FWOTA1 2 0 255 65536 1 4 0 0 0\n')
         result=self.agent(ok=False)
         self.assertIn('local firmware status',result.stdout)
         self.assertFalse(self.calls.exists())
@@ -292,7 +316,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertFalse(self.calls.exists())
 
     def test_auto_pending_manual_update_not_overwritten(self):
-        self.snapshot.write_text('FWOTA1 0 0 1 65536 1 4 65538 0 2\n')
+        self.write_snapshot('FWOTA1 0 0 1 65536 1 4 65538 0 2\n')
         self.agent()
         self.assertFalse(self.calls.exists())
 
@@ -328,7 +352,14 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_rootfs_recovery_uses_exact_payload_hash(self):
         digest = hashlib.sha256(bytes(range(256)) * 1100).hexdigest()
-        path = f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{digest}/rootfs.itb'
+        publication = self.state()['latest']
+        image = self.request('GET', f'/releases/{publication}/identity')[1].decode().split()
+        version = int(image[2]); kernel_bytes, kernel_hash = image[3], image[4]
+        root_bytes, root_hash = image[5], image[6]
+        firmware_id = hashlib.sha256(
+            f'BSPFWCONTENT1\nkernel {kernel_bytes} {kernel_hash}\nrootfs {root_bytes} {root_hash}\n'.encode()
+        ).hexdigest()
+        path = f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{version}/{firmware_id}/{digest}/rootfs.itb'
         self.assertEqual(self.request('GET', path), (200, self.files['rootfs.itb']))
         self.assertEqual(self.request('GET', path.replace(digest, '0'*64))[0], 404)
         self.assertEqual(self.request('GET', path.replace('ti-am62x', 'wrong'))[0], 404)
@@ -338,16 +369,20 @@ class AutomaticOTA(unittest.TestCase):
     def test_recovery_exact_version_and_ambiguity(self):
         bundle, kernel = self.kernel_bundle(65538)
         self.assertEqual(self.publish(self.draft(bundle))[0], 200)
-        path='/recovery/ti-am62x/am62x-sd-ab-v1/kernel/65538/kernel.itb'
+        image = self.request('GET', '/releases/1/identity')[1].decode().split()
+        firmware_id = hashlib.sha256(
+            f'BSPFWCONTENT1\nkernel {image[3]} {image[4]}\nrootfs {image[5]} {image[6]}\n'.encode()
+        ).hexdigest()
+        path=f'/recovery/ti-am62x/am62x-sd-ab-v1/kernel/65538/{firmware_id}/kernel.itb'
         self.assertEqual(self.request('GET',path), (200,kernel))
-        self.assertEqual(self.request('GET',path.replace('65538','65539'))[0],404)
+        self.assertEqual(self.request('GET',path.replace('/65538/','/65539/'))[0],404)
         self.assertEqual(self.request('GET',path.replace('ti-am62x','wrong'))[0],404)
         self.assertEqual(self.request('GET','/releases/2/info'), (200,b'BSPOTAINFO1 2 65538\n'))
         self.assertEqual(self.request('GET',path+'/extra')[0],404)
-        # Same version with different bytes must not be selected arbitrarily.
+        # Same version with different bytes gets a different content ID.
         other, _ = self.kernel_bundle(65538, 'changed')
         self.assertEqual(self.publish(self.draft(other))[0],200)
-        self.assertEqual(self.request('GET',path)[0],404)
+        self.assertEqual(self.request('GET',path), (200,kernel))
 
 for name in ('tearDown', 'fixture', 'bundle', 'request', 'upload', 'state', 'publish', 'draft'):
     setattr(AutomaticOTA, name, admin.AdminHTTP.__dict__[name])

@@ -166,17 +166,19 @@ device.
 `fwctl ota-status` is a read-only, versioned interface used by the BSP OTA agent:
 
 ```text
-FWOTA1 booted active pending version0 successful0 state0 version1 successful1 state1
+FWOTA2 booted active pending version0 successful0 state0 firmware-id0 version1 successful1 state1 firmware-id1
 ```
 
-All fields are decimal integers. `pending=255` means none. States follow
+Numeric fields are decimal integers; each deployment identity is its full 64-character
+SHA-256 firmware ID, or `-` if metadata has no complete identity. `pending=255` means none. States follow
 `edk_fw_deployment_state` (ready=2, boot-testing=3, confirmed=4, failed=5).
 `booted` comes from the current kernel command line, never from mutable pending
 or selected metadata. Missing boot identity (including network boot) returns an
 error. Unknown metadata versions stay zero; rootfs markers are not substituted.
 Automatic OTA requires a confirmed boot, writes the inactive deployment, and
-reports success only after rebooting into the intended version and observing
-health confirmation. The agent does not invoke mark-good itself.
+reconciles the transaction using both the numeric version and full firmware ID.
+It reports success only after rebooting into the exact published version/ID and
+observing health confirmation. The agent does not invoke mark-good itself.
 
 ## initramfs 恢复接口
 

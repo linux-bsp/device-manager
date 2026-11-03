@@ -196,7 +196,7 @@ fw select
 fw recover-kernel
 ```
 
-设备从可信 metadata 获取内核版本，向 `/recovery/<product>/<layout>/kernel/<版本整数>/kernel.itb` 请求，例如版本 1.0.2 对应 65538。服务器只从已发布历史中返回相同产品、布局和内核版本的包；找不到或同版本存在不同内容时返回 404，绝不使用最新版替代。应长期保留设备可能运行的历史包。
+设备从可信 metadata 获取固件版本和完整内容 ID，向 `/recovery/<product>/<layout>/kernel/<版本整数>/<固件ID>/kernel.itb` 请求，例如版本 1.0.2 对应 65538。服务器只从已发布历史中返回相同产品、布局、版本和固件 ID 的包；找不到返回 404，绝不使用最新版或同版本的其他构建替代。U-Boot 还会将下载 FIT 的完整 SHA256 与 metadata 绑定值比较后才写分区。应长期保留设备可能运行的历史包。initramfs 在当前 rootfs 验证通过后也检查另一 rootfs 槽；若其 metadata 身份完整且内容损坏，会尝试通过对应版本+固件 ID+payload SHA256 恢复。修复后的备用 deployment 仍保持 failed，需经常规升级/健康确认后才可启动。
 
 下载大小受分区大小限制；U-Boot 验证 FIT 哈希、既有签名策略、产品、布局、组件类型、版本、rollback index 和已记录构建时间，再修复**原本损坏的内核槽**并读回验证。保留另一槽、rootfs 和 A/B metadata。健康内核不重复刷写。修复成功后重新加载并启动；下载、校验或存储写入失败则不继续 bootm，保留现有启动失败/看门狗行为。
 
@@ -229,8 +229,8 @@ CLI 的 `--version` 是发布编号，必须高于已有编号。`drafts/` 保�
 | `GET /releases/<编号>/identity` | 实际 kernel FIT/rootfs payload 的长度与 SHA256，用于刷写内容比较 |
 | `GET /releases/<编号>/info` | 固件版本整数，与旧下载清单兼容 |
 | `GET/POST /api/devices/<设备ID>` | 读取/持久保存设备事务；POST 需要 `X-OTA-Request: 1` |
-| `GET /recovery/<产品>/<布局>/rootfs/<payload-sha256>/rootfs.itb` | initramfs 按实际 rootfs 内容获取准确恢复包 |
-| `GET /recovery/<产品>/<布局>/kernel/<版本>/kernel.itb` | 按确切内核版本取恢复包 |
+| `GET /recovery/<产品>/<布局>/rootfs/<版本>/<固件ID>/<payload-sha256>/rootfs.itb` | initramfs 按版本、固件 ID 和 rootfs 内容获取准确恢复包 |
+| `GET /recovery/<产品>/<布局>/kernel/<版本>/<固件ID>/kernel.itb` | U-Boot 按版本和固件 ID 获取准确 FIT |
 | `GET /healthz` | 存活检查 |
 
 管理写请求需要 `X-OTA-Request: 1`，上传还需要准确的 Content-Length 和 `application/octet-stream` 类型；不接受 multipart/chunked。浏览器跨来源写请求会被拒绝。这是可信局域网开发服务，没有账号认证、TLS、设备分组或主动推送连接。设备使用轮询；服务串行处理请求，大包上传期间其他请求需要等待。

@@ -85,8 +85,11 @@ class CLI(unittest.TestCase):
             entry = next(x for x in self.state()['releases'] if x['publication'] == publication)
             self.assertEqual(entry['tag'], tag)
             self.assertEqual(entry['firmware_id'], declared.stdout.strip())
-        root_hash=identity.decode().split()[6]
-        restore_status, restore_package = self.request('GET', f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{root_hash}/rootfs.itb')
+        fields=identity.decode().split()
+        firmware_version=int(fields[2]);root_hash=fields[6]
+        firmware_id=version.decode().split()[3]
+        restore_status, restore_package = self.request('GET',
+            f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{firmware_version}/{firmware_id}/{root_hash}/rootfs.itb')
         self.assertEqual(restore_status, 200)
         cache=self.root/'downloaded'
         agent=subprocess.run([str(admin.SOURCE/'fwctld'),'--server',self.env['OTA_SERVER'],

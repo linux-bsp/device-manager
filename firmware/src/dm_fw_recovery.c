@@ -13,7 +13,8 @@
 /* Offline repair of the booted rootfs only. Its identity comes from the verified
  * kernel DTB, not from the server's latest publication or the package wrapper. */
 int fw_restore_rootfs(const struct fw_layout *layout, struct fw_storage *storage,
-    uint32_t deployment, const char *path, uint64_t bytes, const uint8_t sha256[32])
+    uint32_t deployment, const char *path, uint64_t bytes, const uint8_t sha256[32],
+    bool allow_unselected)
 {
     struct fw_metadata metadata;
     struct fw_fit fit;
@@ -24,14 +25,15 @@ int fw_restore_rootfs(const struct fw_layout *layout, struct fw_storage *storage
     if (deployment > 1 || !bytes || !sha256 || !path || strstr(path, "://")) return -EINVAL;
     int ret = fw_metadata_load(storage, &metadata);
     if (ret) return ret;
-    if (metadata.selected_deployment != deployment) return -EPERM;
+    if ((!allow_unselected && metadata.selected_deployment != deployment) ||
+        (allow_unselected && metadata.selected_deployment == deployment)) return -EPERM;
     const struct fw_component_slot *slot = &metadata.deployment[deployment].component[FW_COMPONENT_ROOTFS];
     const struct fw_region *region = fw_layout_component_region(layout, FW_COMPONENT_ROOTFS, slot->slot);
     if (!slot->valid || !region || bytes > region->size) return -EINVAL;
     ret = fw_fit_open(&fit, path, layout);
     if (ret) return ret;
     ret = fw_fit_verify_package(layout, &fit, &package);
-    if (!ret && (package.component != FW_COMPONENT_ROOTFS ||
+    if (!ret && (package.component != FW_COMPONENT_ROOTFS || package.version != slot->version ||
         package.rollback_index < slot->rollback_index)) ret = -EPERM;
     if (!ret) ret = fw_fit_get_component_data(&fit, FW_COMPONENT_ROOTFS, NULL, &data, &size);
     if (!ret && size != bytes) ret = -EBADMSG;
