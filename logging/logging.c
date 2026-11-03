@@ -375,8 +375,9 @@ static int cli_main(int argc,char **argv)
     if(argc==4&&!strcmp(argv[1],"write")){if(stage_id(argv[2])<0)return 2;emit(argv[2],argv[3],strlen(argv[3]));return 0;}
     struct boot list[256];size_t n=boots(list,256);
     if(argc==2&&!strcmp(argv[1],"status")){
-        struct statfs fs;const char *mode=statfs(root,&fs)?"unavailable":fs.f_type==0x01021994||fs.f_type==0x858458f6?"volatile":"persistent";
-        printf("boot=%s\nstorage=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,bootpath,KEEP_BOOTS);return 0;
+        struct statfs fs;char state[64];const char *mode=statfs(root,&fs)?"unavailable":fs.f_type==0x01021994||fs.f_type==0x858458f6?"volatile":"persistent";
+        if(small_read("/run/device-manager/storage-state",state,sizeof(state)))snprintf(state,sizeof(state),"unknown");
+        printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,state,bootpath,KEEP_BOOTS);return 0;
     }
     if(argc==2&&!strcmp(argv[1],"verify-storage"))return verify_storage();
     if(argc==2&&!strcmp(argv[1],"verify-boot"))return verify_bootlog();
