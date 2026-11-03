@@ -30,6 +30,39 @@ static int open_artifact(int root, const char *name, struct stat *st)
     return fd;
 }
 
+/* OTA clients resume with the single open-ended form: Range: bytes=N-. */
+static int range_start(const char *value, uintmax_t *start)
+{
+    if (!value || strncmp(value, "bytes=", 6))
+        return -1;
+    const char *p = value + 6;
+    if (!*p || *p < '0' || *p > '9')
+        return -1;
+    uintmax_t n = 0;
+    do {
+        unsigned digit = (unsigned)(*p - '0');
+        if (n > (UINTMAX_MAX - digit) / 10)
+            return -1;
+        n = n * 10 + digit;
+        p++;
+    } while (*p >= '0' && *p <= '9');
+    if (strcmp(p, "-"))
+        return -1;
+    *start = n;
+    return 0;
+}
+
+static void range_error(int client, uintmax_t size)
+{
+    char header[192];
+    int n = snprintf(header, sizeof(header),
+        "HTTP/1.1 416 Range Not Satisfiable\r\n"
+        "Content-Range: bytes */%ju\r\nContent-Length: 0\r\n"
+        "Connection: close\r\nCache-Control: no-store\r\n\r\n", size);
+    if (n > 0 && n < (int)sizeof(header))
+        (void)http_send_all(client, header, (size_t)n);
+}
+
 static void index_page(int client, bool head)
 {
     if (!http_headers(client, 200, "OK", "text/html; charset=utf-8", sizeof(admin_page) - 1) && !head)
@@ -113,6 +146,7 @@ void server_route_client(int client, const struct server_context *context)
     bool has_length = request.has_length, admin = request.admin, expect = request.expect;
     const char *origin = request.origin, *host = request.host, *type = request.type;
     const char *download_device = request.device;
+    const char *requested_range = request.range;
     struct ota_network_context network = {
         .ip = request.ip, .mac = request.mac, .hostname = request.hostname, .boot = request.boot
     };
@@ -391,11 +425,42 @@ void server_route_client(int client, const struct server_context *context)
         http_text(client, 404, "Not Found", "Artifact unavailable\n", head);
         return;
     }
-    if (!http_headers(client, 200, "OK", "application/octet-stream", (uintmax_t)st.st_size) && !head) {
+    uintmax_t offset = 0;
+    bool partial = requested_range != NULL;
+    if (partial && (range_start(requested_range, &offset) ||
+                    offset >= (uintmax_t)st.st_size)) {
+        range_error(client, (uintmax_t)st.st_size);
+        close(fd);
+        return;
+    }
+    uintmax_t response_size = (uintmax_t)st.st_size - offset;
+    char response_header[320];
+    int header_size;
+    if (partial) {
+        header_size = snprintf(response_header, sizeof(response_header),
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\n"
+            "Content-Length: %ju\r\nContent-Range: bytes %ju-%ju/%ju\r\n"
+            "Accept-Ranges: bytes\r\nCache-Control: no-store\r\n"
+            "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+            response_size, offset, (uintmax_t)st.st_size - 1,
+            (uintmax_t)st.st_size);
+    } else {
+        header_size = snprintf(response_header, sizeof(response_header),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+            "Content-Length: %ju\r\nAccept-Ranges: bytes\r\n"
+            "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+            "Connection: close\r\n\r\n", response_size);
+    }
+    if (header_size > 0 && header_size < (int)sizeof(response_header) &&
+        !http_send_all(client, response_header, (size_t)header_size) && !head) {
+        if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
+            close(fd);
+            return;
+        }
         char buffer[65536];
-        off_t remaining = st.st_size;
+        uintmax_t remaining = response_size;
         while (remaining > 0 && (*context->running)) {
-            size_t wanted = remaining < (off_t)sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
+            size_t wanted = remaining < sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
             ssize_t count = read(fd, buffer, wanted);
             if (count < 0 && errno == EINTR)
                 continue;

@@ -104,7 +104,7 @@ make -C buildroot
 
 既有输出目录首次启用该包时，使用 `menuconfig` 选择 `fwctld`，再执行 `libcurl-reconfigure busybox-reconfigure fwctld` 和完整构建。
 
-设备需先准备可写且容量足够的缓存目录。持久使用可选择已挂载的 `/data/fwctld`；当前两版测试镜像使用 `/tmp/fwctld`，重启会清空。
+设备需先准备可写且容量足够的缓存目录。默认使用 `/data/fwctld`，它位于持久化 data 分区，未完成下载可在断电重启后继续。若 data 分区未挂载，启动脚本会记录警告并退回 `/tmp/fwctld`，OTA 仍可工作，但断电后未完成的下载无法续传。当前 AM625 实机启动日志显示 data 分区尚不可写；要在该设备验证跨断电续传，需要先单独准备可写的 data 文件系统，不能由升级脚本自动格式化。
 
 ```sh
 mkdir -p /data/fwctld
@@ -115,7 +115,7 @@ fwctld --server http://192.168.10.246:8090 \
 
 加 `--once` 则只检查一次。尚未发布时会报告检查失败并等待下次重试。下载完整且校验通过后，生成 `/data/fwctld/<发布编号>/` 和 `current`；`current` 只表示下载完成，不代表已安装或启动成功。
 
-重复检查不会重新下载同一发布，但会验证缓存。失败不会替换之前的 `current`。暂不支持断点续传；损坏的已完成缓存需删除对应编号目录后重试。历史下载和异常退出留下的 `.download-*` 可在停止 fwctld 后按需清理。
+重复检查不会重新下载同一发布，但会验证缓存。下载暂存目录为 `.download-<发布编号>`，每个文件按服务端 Range 响应续传；中断后保留已下载字节，完整下载后仍逐文件校验 SHA256。文件校验失败会丢弃该文件并重新下载，失败下载不会替换之前的 `current`。若正在下载时突然断电，最终 SHA256 校验仍会检测未落盘或损坏的数据。
 
 ## 自动安装与结果上报
 
@@ -126,7 +126,7 @@ FWCTLD_ENABLED=1
 FWCTLD_SERVER="http://192.168.10.246:8090"
 FWCTLD_PRODUCT="ti-am62x"
 FWCTLD_LAYOUT="am62x-sd-ab-v1"
-FWCTLD_CACHE="/tmp/fwctld"
+FWCTLD_CACHE="/data/fwctld"
 FWCTLD_INTERVAL=15
 FWCTLD_AUTO_INSTALL=1
 FWCTLD_DEVICE_ID=""  # 默认使用 eth0 的 MAC，将冒号替换为连字符
@@ -137,10 +137,10 @@ FWCTLD_DEVICE_ID=""  # 默认使用 eth0 的 MAC，将冒号替换为连字符
 ```sh
 # 先停止已有 fwctld，避免缓存锁冲突。
 /etc/init.d/S98fwctld stop
-mkdir -p /tmp/fwctld
+mkdir -p /data/fwctld
 fwctld --server http://192.168.10.246:8090 \
     --product ti-am62x --layout am62x-sd-ab-v1 \
-    --cache /tmp/fwctld --auto-install --device 1c-63-49-22-c4-f7 --once
+    --cache /data/fwctld --auto-install --device 1c-63-49-22-c4-f7 --once
 ```
 
 `--once --auto-install` 也会实际安装并重启；不带 `--auto-install` 则只下载。正常后台运行去掉 `--once`，或启动 init 服务。
@@ -360,7 +360,7 @@ fwctld 边读边转发 stdout/stderr，不再等安装结束后一次性打印�
 | 启动脚本 | `/etc/init.d/S98fwctld` |
 | 默认/持久配置 | `/etc/default/fwctld` / `/data/fwctld.conf` |
 | PID / 日志 | `/var/run/fwctld.pid` / `/var/log/fwctld.log` |
-| 新配置默认缓存 | `/tmp/fwctld` |
+| 新配置默认缓存 | `/data/fwctld` |
 
 设备配置变量统一使用 `FWCTLD_*`，仅加载 `/etc/default/fwctld` 和
 `/data/fwctld.conf`，后者覆盖默认配置。管理主机 `ota-cli` 的 `OTA_SERVER` 不变。

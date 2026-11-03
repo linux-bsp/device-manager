@@ -14,7 +14,7 @@ struct http_request {
     char peer_ip[46];
     unsigned long long length;
     bool head, has_length, admin, expect;
-    const char *origin, *host, *type, *device, *authorization;
+    const char *origin, *host, *type, *device, *authorization, *range;
     const char *ip, *mac, *hostname, *boot;
 };
 

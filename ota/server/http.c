@@ -168,6 +168,8 @@ int http_read_request(int client, struct http_request *request)
             if (set_once(&request->hostname, value)) return 400;
         } else if (!strcasecmp(line, "X-OTA-Boot")) {
             if (set_once(&request->boot, value)) return 400;
+        } else if (!strcasecmp(line, "Range")) {
+            if (set_once(&request->range, value)) return 400;
         } else if (!strcasecmp(line, "Expect")) {
             if (request->expect || strcasecmp(value, "100-continue")) return 400;
             request->expect = true;

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -17,25 +18,110 @@ static void stop_daemon(int sig)
     ota_stop = 1;
 }
 
-static int download(const char *url, const char *path, unsigned long long limit, int allow_absent, const char *device)
+static void sync_download_file(const char *path)
+{
+    char directory[OTA_PATH];
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0644);
+    if (fd >= 0) {
+        (void)fsync(fd);
+        close(fd);
+    }
+    if (strlen(path) < sizeof(directory)) {
+        strcpy(directory, path);
+        char *slash = strrchr(directory, '/');
+        if (slash) {
+            if (slash == directory) slash[1] = '\0';
+            else *slash = '\0';
+            (void)ota_sync_dir(directory);
+        }
+    }
+}
+
+static int download(const char *url, const char *path, unsigned long long limit,
+                    const char *expected_hash, int resume, int allow_absent,
+                    const char *device)
 {
     char maximum[32], status[16];
     (void)device;
     snprintf(maximum, sizeof(maximum), "%llu", limit);
-    char *args[] = {"curl", "--disable", "--silent", "--show-error",
-        "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "10",
-        "--max-time", "1800", "--speed-limit", "1024", "--speed-time", "30",
-        "--max-filesize", maximum, "--output", (char *)path, "--write-out", "%{http_code}", "--url", (char *)url, NULL};
-    if (fwctld_request(args, status, sizeof(status)))
+    unsigned long long offset = 0;
+    if (resume) {
+        int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) {
+                close(fd);
+                return -1;
+            }
+            offset = (unsigned long long)st.st_size;
+            close(fd);
+            if (offset > limit) {
+                if (unlink(path)) return -1;
+                offset = 0;
+            } else if (offset == limit) {
+                char hash[65]; unsigned long long size;
+                if (!ota_hash(path, hash, &size) && size == limit &&
+                    expected_hash && !strcmp(hash, expected_hash)) {
+                    const char *file = strrchr(url, '/');
+                    fwctld_log("Reusing SHA256-verified cached file %s", file ? file + 1 : url);
+                    return 0;
+                }
+                if (unlink(path)) return -1;
+                offset = 0;
+            }
+        } else if (errno != ENOENT) {
+            return -1;
+        }
+        sync_download_file(path);
+    }
+    if (offset) {
+        const char *file = strrchr(url, '/');
+        fwctld_log("Resuming %s at byte %llu", file ? file + 1 : url, offset);
+    }
+    char *args[40]; unsigned n = 0;
+    args[n++] = "curl"; args[n++] = "--disable"; args[n++] = "--silent";
+    args[n++] = "--show-error"; args[n++] = "--noproxy"; args[n++] = "*";
+    args[n++] = "--proto"; args[n++] = "=http,https";
+    args[n++] = "--connect-timeout"; args[n++] = "10";
+    args[n++] = "--max-time"; args[n++] = "1800";
+    args[n++] = "--speed-limit"; args[n++] = "1024";
+    args[n++] = "--speed-time"; args[n++] = "30";
+    args[n++] = "--max-filesize"; args[n++] = maximum;
+    if (resume && offset) { args[n++] = "--continue-at"; args[n++] = "-"; }
+    args[n++] = "--output"; args[n++] = (char *)path;
+    args[n++] = "--write-out"; args[n++] = "%{http_code}";
+    args[n++] = "--url"; args[n++] = (char *)url; args[n] = NULL;
+    if (fwctld_request(args, status, sizeof(status))) {
+        sync_download_file(path);
+        fwctld_error("Download interrupted at byte %llu; partial data retained for resume", offset);
         return -1;
+    }
     if (allow_absent && (!strcmp(status, "404") || !strcmp(status, "204"))) return 1;
-    if (strcmp(status, "200")) { fwctld_error("HTTP %s while downloading %s", status, url); return -1; }
-    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0)
+    if ((!offset && strcmp(status, "200")) || (offset && strcmp(status, "206"))) {
+        fwctld_error("HTTP %s while resuming %s at byte %llu", status, url, offset);
         return -1;
+    }
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return -1;
     int rc = fsync(fd);
+    struct stat st;
+    if (!rc && (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+                (unsigned long long)st.st_size > limit ||
+                (expected_hash && (unsigned long long)st.st_size != limit))) rc = -1;
     close(fd);
-    return rc;
+    sync_download_file(path);
+    if (rc) {
+        fwctld_error("Downloaded size does not match manifest for %s; partial data retained", url);
+        return -1;
+    }
+    char hash[65]; unsigned long long size;
+    if (expected_hash && (ota_hash(path, hash, &size) || size != limit ||
+        strcmp(hash, expected_hash))) {
+        (void)unlink(path);
+        fwctld_error("SHA256 mismatch for %s; discarded partial file", url);
+        return -1;
+    }
+    return 0;
 }
 
 /* Return 1 when installed version and payload hashes already match. */
@@ -44,14 +130,14 @@ static int poll_release(const char *server, const char *cache, const char *produ
 {
     static unsigned long long last_blocked;
     static int waiting;
-    char temp[OTA_PATH], path[OTA_PATH], url[OTA_PATH], current[OTA_PATH], dest[OTA_PATH], name[64];
+    char temp[OTA_PATH], stage[OTA_PATH], path[OTA_PATH], url[OTA_PATH], current[OTA_PATH], dest[OTA_PATH], name[64];
     struct release r, old;
     char label[128];
     int rc = -1, unchanged = 0;
     if (ota_path(temp, cache, ".download-XXXXXX") || !mkdtemp(temp))
         return -1;
     if (ota_path(path, temp, "manifest") || ota_path(url, server, "latest")) goto done;
-    int fetched = download(url, path, 2048, 1, device);
+    int fetched = download(url, path, 2048, NULL, 0, 1, device);
     if (fetched == 1) {
         if (!waiting) fwctld_log("No active OTA publication; waiting");
         waiting = 1; rc = 1; goto done;
@@ -125,12 +211,17 @@ static int poll_release(const char *server, const char *cache, const char *produ
             goto done;
         }
     } else {
+        snprintf(name, sizeof(name), ".download-%llu", r.version);
+        if (ota_path(stage, cache, name) || ota_mkdir(stage)) {
+            fwctld_error("Cannot create persistent download staging directory");
+            goto done;
+        }
         for (int i = 0; i < 3; i++) {
             char relative[96];
             snprintf(relative, sizeof(relative), "releases/%llu/%s", r.version, ota_files[i]);
             fwctld_log("Downloading %s (%llu bytes), firmware %s", ota_files[i], r.size[i], label);
-            if (ota_path(url, server, relative) || ota_path(path, temp, ota_files[i]) ||
-                download(url, path, r.size[i], 0, device)) {
+            if (ota_path(url, server, relative) || ota_path(path, stage, ota_files[i]) ||
+                download(url, path, r.size[i], r.hash[i], 1, 0, device)) {
                 fwctld_error("Download failed: %s, firmware %s", ota_files[i], label);
                 if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "device-error", "download-failed");
                 goto done;
@@ -138,11 +229,14 @@ static int poll_release(const char *server, const char *cache, const char *produ
             fwctld_log("Download complete: %s", ota_files[i]);
         }
         fwctld_log("Verifying SHA256 for firmware %s", label);
-        if (ota_verify(temp, &r)) {
+        if (ota_verify(stage, &r)) {
+            fwctld_error("Staged download does not match the release manifest");
             if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "verify-failed", "download-sha256-mismatch");
             goto done;
         }
-        if (ota_sync_dir(temp) || rename(temp, dest) || ota_sync_dir(cache)) {
+        if (ota_path(path, stage, "manifest")) goto done;
+        (void)unlink(path);
+        if (ota_write(path, &r) || ota_sync_dir(stage) || rename(stage, dest) || ota_sync_dir(cache)) {
             if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "device-error", "cache-storage-failed");
             goto done;
         }
@@ -164,9 +258,6 @@ static int poll_release(const char *server, const char *cache, const char *produ
     fwctld_log("Ready: firmware %s", label);
     rc = 0;
 done:
-    for (int i = 0; i < 3; i++)
-        if (!ota_path(path, temp, ota_files[i]))
-            unlink(path);
     if (!ota_path(path, temp, "manifest"))
         unlink(path);
     rmdir(temp);
