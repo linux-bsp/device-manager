@@ -27,10 +27,23 @@ async function loadState(){
  renderFleet(data);
  $('service-health').textContent='管理服务已连接';$('service-health').classList.remove('error');
  if(location.pathname==='/firmware'){renderDetails(data);return;}
- const current=data.releases.find(r=>r.publication===data.latest);
- $('current-version').textContent=current?(current.tag||current.firmware_version):'尚未发布';
- $('current-details').textContent=current?`${(current.firmware_id||'').slice(0,8)} · ${current.product}`:'上传固件并发布后，设备即可获取。';
+ const latest=data.releases.find(r=>r.publication===data.latest);
+ const current=latest?.published?latest:null;
+ const held=data.latest>0&&!current;
+ const currentLabel=current?(current.tag||current.firmware_version):held?'发布已暂停或记录不可用':'尚未发布';
+ $('current-version').textContent=currentLabel;
+ $('current-details').textContent=current?`#${current.publication} · ${current.product} · ${(current.firmware_id||'').slice(0,8)}`:held?`服务器记录的最新发布 #${data.latest} 当前不可供设备下载，请检查异常审计。`:'上传固件并发布后，设备即可获取。';
  $('current-details').title=current?.firmware_id||'';
+ const currentPanel=$('published-current');
+ currentPanel.hidden=!current&&!held;
+ $('published-current-status').textContent=current?'设备当前可获取':'发布已暂停 / 记录不可用';
+ $('published-current-status').className='pill '+(current?'good':'warn');
+ $('published-current-version').textContent=current?`${current.tag||current.firmware_version} · 发布 #${current.publication}`:`服务器最新发布 #${data.latest} 当前不可获取`;
+ $('published-current-meta').textContent=current?`${current.product} / ${current.layout} · 固件 ID ${(current.firmware_id||'').slice(0,8)} · ${size(current.bytes)}`:'设备不会下载此版本。请检查异常审计或发布目录。';
+ $('published-current-meta').title=current?.firmware_id||'';
+ const currentLink=$('published-current-link');
+ currentLink.hidden=!current;
+ if(current)currentLink.href='/firmware?kind=release&id='+encodeURIComponent(current.publication)+'&tab=manage';
  const phases={'requested':'请求升级','installing':'正在安装','rebooting':'等待重启','boot-testing':'启动健康检查中','success':'升级成功','install-failed':'安装失败','rolled-back':'已回滚','interrupted':'升级中断','reboot-failed':'重启失败','up-to-date':'无需升级','device-error':'设备异常','verify-failed':'固件校验失败'};
  const why=r=>r==='not-reported'?'原因未上报':r==='none'?'—':r||'未上报';
  const fmt=v=>v?`v${v>>>16}.${(v>>>8)&255}.${v&255}`:'未知';
