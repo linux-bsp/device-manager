@@ -4,7 +4,7 @@ WARN = -std=gnu11 -Wall -Wextra -Werror
 FW_SOURCES = $(wildcard firmware/src/*.c)
 FWCTL_SOURCES = $(wildcard fwctl/src/*.c) fwctl/adapter/peripheral_ipc.c recovery/fw-init.c
 FW_INCLUDES = -Ifirmware/include -Ifirmware/src -Ifwctl/include -Ifwctl/adapter
-.PHONY: all host device device-server ota-cli fwctld fwctl logctl logctld test clean
+.PHONY: all host device device-server ota-cli fwctld fwctl logctl logctld test test-storage clean
 all: host device
 host: device-server ota-cli
 device: fwctl fwctld logctl logctld
@@ -21,6 +21,8 @@ test:
 	python3 tests/test_firmware.py
 	$(MAKE) -C logging test
 	$(MAKE) -C ota test
+test-storage: logctld fwctld
+	python3 tests/test_storage_sync.py
 clean:
 	$(MAKE) -C ota clean
 	$(MAKE) -C logging clean

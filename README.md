@@ -64,6 +64,10 @@ AM625 启动脚本只尝试挂载已有的 `/dev/mmcblk1p15` ext4 文件系统�
 
 每个启动记录包含阶段日志、内核原始记录、服务日志、fwctl 版本输出和内核命令行。默认保留最近 4 次启动，每阶段日志保留 2 个不超过 2 MiB 的文件；pstore 单次归档限制 1 MiB。正常日志批量同步，事件日志立即同步。目录仅 root 可读。
 
+周期同步按单调时钟每 5 秒触发，检查当前启动文件及目录的同步返回值。`logctl status` 显示 `sync-state`、`synced-sequence`、`observed-sequence` 和 `sync-errno`；同步失败时保留此前已同步序号并限频告警，后续同步成功才更新序号。写入失败可能产生不完整记录，当前实现会保持错误状态直到重启采集器。这里的序号表示本次采集器完成同步的记录范围，不是服务器归档确认或掉电安全保证；CRC 分段恢复仍属后续工作。
+
+`fwctld` 检查下载文件及父目录同步，完整缓存复用时也重新确认同步。失败时不进入本轮安装流程，不把校验通过等同于持久化完成。可在原生主机运行 `make test-storage` 注入 EIO、ENOSPC、EROFS 验证这些边界；夹具通过测试进程的 `LD_PRELOAD` 生效，固件不包含故障注入开关。
+
 SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` 读取已校验快照。SPL/U-Boot 必须更新后才能产生这些记录；OTA 仅更新 kernel/rootfs 时不能验证新引导程序。initramfs 的日志通过移动 `/run` 留给主系统。
 
 采集范围是已接入的 UART 启动输出、kernel printk、启动脚本与 `/var/log/*.log` 服务输出，并非物理 UART 的无遗漏监听。ROM、TIFS、ATF 输出、未接入服务及任意交互 shell 的输出不在当前覆盖范围内。超过容量会截断或轮转；RAM 缓存与 ramoops 不保证断电保留，启动到 Linux 之前失败的日志也不能保证落盘。`show` 按阶段展示，跨阶段时间并不共享同一计时起点。

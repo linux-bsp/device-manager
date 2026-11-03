@@ -29,7 +29,9 @@ static const char *stages[STREAMS] = {"r5-spl", "a53-spl", "uboot", "initramfs",
 static char runtime[PATH_CAP], root[PATH_CAP], current[64], bootpath[PATH_CAP];
 static size_t file_limit = LIMIT;
 static volatile sig_atomic_t stopping;
-static unsigned long long sequence;
+static unsigned long long sequence, synced_sequence;
+static int write_failure, last_sync_error;
+static struct timespec last_storage_warning;
 static int pmsg_fd = -1;
 struct packet { char stage[16]; char data[CHUNK]; };
 static void stop(int sig) { (void)sig; stopping = 1; }
@@ -59,7 +61,7 @@ static int directory(const char *p)
 static int write_all(int fd, const void *data, size_t n)
 {
     const char *p=data;
-    while (n) { ssize_t k=write(fd,p,n); if(k<0) { if(errno==EINTR)continue;return -1; } if(!k)return -1; p+=k;n-=(size_t)k; }
+    while (n) { ssize_t k=write(fd,p,n); if(k<0) { if(errno==EINTR)continue;return -1; } if(!k){errno=EIO;return -1;} p+=k;n-=(size_t)k; }
     return 0;
 }
 static int small_read(const char *path, char *buf, size_t cap)
@@ -72,7 +74,31 @@ static int save_text(const char *path, const char *s)
 {
     int fd=open(path,O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC|O_NOFOLLOW,0600);
     if(fd<0)return -1;
-    int ret=write_all(fd,s,strlen(s)); if(!ret)ret=fsync(fd); close(fd); return ret;
+    int ret=write_all(fd,s,strlen(s)); if(!ret)ret=fsync(fd);
+    int error=errno; if(close(fd)&&!ret){ret=-1;error=errno;} errno=error; return ret;
+}
+/* Runtime diagnostics describe completed syncs in this daemon instance. They
+ * are not a persistent record index or an acknowledgement from the server. */
+static void sync_status(const char *state, int error)
+{
+    char path[PATH_CAP], temp[PATH_CAP], value[256];
+    join(path,runtime,"sync-status"); join(temp,runtime,".sync-status.tmp");
+    snprintf(value,sizeof(value),"sync-state=%s\nsynced-sequence=%llu\nobserved-sequence=%llu\nsync-errno=%d\n",state,synced_sequence,sequence,error);
+    if(save_text(temp,value)||rename(temp,path)) {
+        int saved=errno;unlink(temp);errno=saved;
+        perror("[logctld] [ERROR] cannot record sync status");
+    }
+}
+static void storage_error(int error)
+{
+    struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
+    if(!error)error=EIO;
+    if(error!=last_sync_error||now.tv_sec-last_storage_warning.tv_sec>=30){
+        fprintf(stderr,"[logctld] [ERROR] local persistence unconfirmed: %s; last synced sequence=%llu\n",strerror(error),synced_sequence);
+        last_storage_warning=now;
+    }
+    last_sync_error=error;
+    sync_status("error",error);
 }
 static void setup(void)
 {
@@ -111,11 +137,12 @@ static void emit(const char *stage, const void *text, size_t len)
     fd=open(p,O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC|O_NOFOLLOW,0600);
     if(fd>=0) { struct stat st; if(!flock(fd,LOCK_EX)&&!fstat(fd,&st)&&st.st_size<256*1024)(void)write_all(fd,text,len);close(fd); }
 }
-static int append_source(const char *stage, const char *data, size_t n, const char *source)
+static int sync_directory(const char *path);
+static int append_source_impl(const char *stage, const char *data, size_t n, const char *source)
 {
     char p[PATH_CAP],old[PATH_CAP],name[64];struct stat st;
     snprintf(name,sizeof(name),"%s.log",stage);join(p,bootpath,name);
-    if(!lstat(p,&st) && (!S_ISREG(st.st_mode)||st.st_nlink!=1))return -1;
+    if(!lstat(p,&st) && (!S_ISREG(st.st_mode)||st.st_nlink!=1)){errno=EINVAL;return -1;}
     if(!lstat(p,&st) && (size_t)st.st_size+n+512>file_limit) {
         snprintf(name,sizeof(name),"%s.log.1",stage);join(old,bootpath,name);
         if(rename(p,old))return -1;
@@ -126,24 +153,60 @@ static int append_source(const char *stage, const char *data, size_t n, const ch
     int ret=write_all(fd,head,(size_t)k) || write_all(fd,data,n);
     /* Transport frames never add a newline to the original console bytes. */
     /* Critical events are durable immediately. Routine data is synced in batches. */
-    if(!strcmp(stage,"events"))ret|=fdatasync(fd);
-    close(fd);
+    if(!strcmp(stage,"events")){
+        if(fdatasync(fd)||sync_directory(bootpath)||sync_directory(root))ret=-1;
+    }
+    int saved_error=errno;
+    if(close(fd)&&!ret){ret=-1;saved_error=errno;}
     if(pmsg_fd>=0 && (!strcmp(stage,"events")||!strcmp(stage,"services"))) {
         if(write_all(pmsg_fd,head,(size_t)k)||write_all(pmsg_fd,data,n)) { close(pmsg_fd);pmsg_fd=-1; }
     }
-    return ret;
+    errno=saved_error;return ret;
+}
+static int append_source(const char *stage,const char *data,size_t n,const char *source)
+{
+    int rc=append_source_impl(stage,data,n,source);
+    if(rc){if(!write_failure)write_failure=errno?errno:EIO;storage_error(write_failure);}
+    return rc;
 }
 static int append_record(const char *stage, const char *data, size_t n)
 { return append_source(stage,data,n,"console"); }
-static void event(const char *s) { if(append_record("events",s,strlen(s)))perror("[logctld] [ERROR] log write"); }
-static void sync_logs(void)
+static void event(const char *s) { (void)append_record("events",s,strlen(s)); }
+static int sync_directory(const char *path)
 {
-    char p[PATH_CAP];
-    for(int i=0;i<STREAMS;i++)for(int j=0;j<2;j++){
-        char name[64];snprintf(name,sizeof(name),"%s.log%s",stages[i],j?".1":"");join(p,bootpath,name);
-        int fd=open(p,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd>=0){(void)fsync(fd);close(fd);}
+    int fd=open(path,O_DIRECTORY|O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return -1;
+    int rc=fsync(fd),error=errno;
+    if(close(fd)&&!rc){rc=-1;error=errno;}
+    errno=error;return rc;
+}
+static int sync_logs(void)
+{
+    int error=write_failure;
+    DIR *dir=opendir(bootpath);
+    if(!dir){if(!error)error=errno;}
+    else {
+        struct dirent *entry;
+        for(;;){
+            errno=0;entry=readdir(dir);
+            if(!entry){if(errno&&!error)error=errno;break;}
+            if(entry->d_name[0]=='.')continue;
+            char path[PATH_CAP];join(path,bootpath,entry->d_name);
+            int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK);
+            if(fd<0){if(!error)error=errno;continue;}
+            struct stat st;int rc=fstat(fd,&st);
+            if(!rc&&!S_ISREG(st.st_mode)){errno=EINVAL;rc=-1;}
+            if(!rc)rc=fsync(fd);
+            if(rc&&!error)error=errno;
+            if(close(fd)&&!error)error=errno;
+        }
+        if(closedir(dir)&&!error)error=errno;
     }
-    int fd=open(bootpath,O_DIRECTORY|O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd>=0){(void)fsync(fd);close(fd);}
+    if(sync_directory(bootpath)&&!error)error=errno;
+    if(sync_directory(root)&&!error)error=errno;
+    if(error){storage_error(error);errno=error;return -1;}
+    synced_sequence=sequence;
+    if(last_sync_error)fprintf(stderr,"[logctld] [INFO] local log synchronization recovered; synced sequence=%llu\n",synced_sequence);
+    last_sync_error=0;sync_status("ok",0);return 0;
 }
 struct boot { char name[64]; unsigned long long order; };
 static int boot_compare(const void *a,const void *b)
@@ -322,14 +385,15 @@ static int daemon_main(int argc,char **argv)
         if(!forwarder){execl("/proc/self/exe","logctl","forward","--root",root,NULL);_exit(127);}
         if(forwarder<0)event("SOL worker could not start; local collection continues");
     }
-    unsigned ticks=0;
+    (void)sync_logs();
+    struct timespec last_sync;clock_gettime(CLOCK_MONOTONIC,&last_sync);
     while(!stopping) {
         struct pollfd fds[2]={{sock,POLLIN,0},{kmsg,POLLIN,0}};
         (void)poll(fds,2,250);
         if(fds[0].revents&POLLIN)for(int j=0;j<64;j++){
             struct packet packet;ssize_t n=recv(sock,&packet,sizeof(packet),0);if(n<0)break;
             if(n<=16||!memchr(packet.stage,0,16)||stage_id(packet.stage)<0)continue;
-            if(append_record(packet.stage,packet.data,(size_t)n-16))perror("[logctld] [ERROR] write");
+            (void)append_record(packet.stage,packet.data,(size_t)n-16);
         }
         if(fds[1].revents&POLLIN)for(int j=0;j<128;j++){
             char buf[8192];ssize_t n=read(kmsg,buf,sizeof(buf));if(n<0){if(errno==EPIPE)event("kernel ring overrun: messages lost");break;}
@@ -337,7 +401,10 @@ static int daemon_main(int argc,char **argv)
             if(append_record("kernel",buf,(size_t)n))break;
         }
         scan_services();if(child>0&&waitpid(child,NULL,WNOHANG)==child)child=0;
-        if(++ticks>=20){sync_logs();ticks=0;}
+        struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
+        if(now.tv_sec-last_sync.tv_sec>5||(now.tv_sec-last_sync.tv_sec==5&&now.tv_nsec>=last_sync.tv_nsec)){
+            (void)sync_logs();last_sync=now;
+        }
     }
     if(forwarder>0){
         kill(forwarder,SIGTERM);
@@ -377,7 +444,10 @@ static int cli_main(int argc,char **argv)
     if(argc==2&&!strcmp(argv[1],"status")){
         struct statfs fs;char state[64];const char *mode=statfs(root,&fs)?"unavailable":fs.f_type==0x01021994||fs.f_type==0x858458f6?"volatile":"persistent";
         if(small_read("/run/device-manager/storage-state",state,sizeof(state)))snprintf(state,sizeof(state),"unknown");
-        printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,state,bootpath,KEEP_BOOTS);return 0;
+        printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,state,bootpath,KEEP_BOOTS);
+        char status[PATH_CAP];join(status,runtime,"sync-status");
+        if(access(status,F_OK))puts("sync-state=unknown");else if(show_file(status))return 1;
+        return 0;
     }
     if(argc==2&&!strcmp(argv[1],"verify-storage"))return verify_storage();
     if(argc==2&&!strcmp(argv[1],"verify-boot"))return verify_bootlog();

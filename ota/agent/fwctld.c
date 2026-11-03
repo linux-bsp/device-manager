@@ -18,23 +18,26 @@ static void stop_daemon(int sig)
     ota_stop = 1;
 }
 
-static void sync_download_file(const char *path)
+/* Never promote a file until both its data and parent entry are synced. */
+static int sync_download_file(const char *path)
 {
     char directory[OTA_PATH];
-    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0644);
-    if (fd >= 0) {
-        (void)fsync(fd);
-        close(fd);
-    }
-    if (strlen(path) < sizeof(directory)) {
-        strcpy(directory, path);
-        char *slash = strrchr(directory, '/');
-        if (slash) {
-            if (slash == directory) slash[1] = '\0';
-            else *slash = '\0';
-            (void)ota_sync_dir(directory);
-        }
-    }
+    if(strlen(path)>=sizeof(directory)){errno=ENAMETOOLONG;return -1;}
+    strcpy(directory,path);
+    char *slash=strrchr(directory,'/');
+    if(!slash){errno=EINVAL;return -1;}
+    if(slash==directory)slash[1]='\0';else *slash='\0';
+    int fd=open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0644);
+    if(fd<0)return -1;
+    struct stat st;
+    int rc=fstat(fd,&st);
+    if(!rc&&!S_ISREG(st.st_mode)){errno=EINVAL;rc=-1;}
+    if(!rc)rc=fsync(fd);
+    int error=errno;
+    if(close(fd)&&!rc){rc=-1;error=errno;}
+    if(!rc&&ota_sync_dir(directory)){rc=-1;error=errno;}
+    if(rc)fwctld_error("Cache synchronization failed for %s: %s; file is not ready for installation",path,strerror(error));
+    errno=error;return rc;
 }
 
 static int download(const char *url, const char *path, unsigned long long limit,
@@ -62,6 +65,7 @@ static int download(const char *url, const char *path, unsigned long long limit,
                 char hash[65]; unsigned long long size;
                 if (!ota_hash(path, hash, &size) && size == limit &&
                     expected_hash && !strcmp(hash, expected_hash)) {
+                    if(sync_download_file(path))return -1;
                     const char *file = strrchr(url, '/');
                     fwctld_log("Reusing SHA256-verified cached file %s", file ? file + 1 : url);
                     return 0;
@@ -72,7 +76,7 @@ static int download(const char *url, const char *path, unsigned long long limit,
         } else if (errno != ENOENT) {
             return -1;
         }
-        sync_download_file(path);
+        if(sync_download_file(path))return -1;
     }
     if (offset) {
         const char *file = strrchr(url, '/');
@@ -92,7 +96,7 @@ static int download(const char *url, const char *path, unsigned long long limit,
     args[n++] = "--write-out"; args[n++] = "%{http_code}";
     args[n++] = "--url"; args[n++] = (char *)url; args[n] = NULL;
     if (fwctld_request(args, status, sizeof(status))) {
-        sync_download_file(path);
+        if(sync_download_file(path))fwctld_error("Partial download retained without durability confirmation");
         fwctld_error("Download interrupted at byte %llu; partial data retained for resume", offset);
         return -1;
     }
@@ -103,13 +107,13 @@ static int download(const char *url, const char *path, unsigned long long limit,
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return -1;
-    int rc = fsync(fd);
+    int rc = 0;
     struct stat st;
-    if (!rc && (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+    if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
                 (unsigned long long)st.st_size > limit ||
-                (expected_hash && (unsigned long long)st.st_size != limit))) rc = -1;
-    close(fd);
-    sync_download_file(path);
+                (expected_hash && (unsigned long long)st.st_size != limit)) rc = -1;
+    if(close(fd))rc=-1;
+    if(sync_download_file(path))return -1;
     if (rc) {
         fwctld_error("Downloaded size does not match manifest for %s; partial data retained", url);
         return -1;
@@ -210,6 +214,9 @@ static int poll_release(const char *server, const char *cache, const char *produ
             fwctld_error("Cached files damaged; remove affected version directory and retry\n");
             goto done;
         }
+        for(int i=0;i<3;i++){
+            if(ota_path(path,dest,ota_files[i])||sync_download_file(path))goto done;
+        }
     } else {
         snprintf(name, sizeof(name), ".download-%llu", r.version);
         if (ota_path(stage, cache, name) || ota_mkdir(stage)) {
@@ -243,6 +250,7 @@ static int poll_release(const char *server, const char *cache, const char *produ
         fwctld_log("Downloaded and SHA256-verified firmware %s", label);
     }
     if (unchanged && !force) {
+        if(sync_download_file(current))goto done;
         fwctld_log("Already cached firmware %s", label);
         rc = 0;
         goto done;
