@@ -70,7 +70,7 @@ logctl boots
 
 ## SPL/U-Boot 验证
 
-本次 OTA 不升级引导程序。`bootloader.itb` 和原始 tiboot3/tispl/u-boot 产物已独立提供。`fw update tftp <bootloader.itb>` 更新选择的引导槽位；AM625 ROM 固定读取 tiboot3_a，单次更新备用槽位不能保证 ROM 首级已经换新。完整验收建议在备用 SD 卡上烧录本次 `sdcard.img`，保留原卡作为恢复介质。
+仅更新 kernel/rootfs 的 OTA 不会升级引导程序。`bootloader.itb` 和原始 tiboot3/tispl/u-boot 产物已独立提供。AM625 ROM 固定读取 tiboot3_a；更新备用槽位不能证明首级 SPL 已更新。刷写前应备份当前启动分区，并核对镜像与写入后分区的 SHA256。
 
 新引导程序启动后，在 Linux 执行：
 
@@ -81,4 +81,12 @@ logctl show --stage a53-spl
 logctl show --stage uboot
 ```
 
-三个阶段都应显示 `handoff=verified-by-kernel`，日志中应能区分 R5 SPL、A53 SPL、U-Boot。Linux 驱动检查记录头、长度、阶段和 CRC32；仅仅存在 sysfs 目录不能判定通过。至少再冷启动、正常重启各一次，核对没有混入前次启动记录，并执行容量溢出测试。未连接串口、未安装新引导程序时，这项必须保留为待实机验证。
+三个阶段都应显示 `handoff=verified-by-kernel`，日志中应能区分 R5 SPL、A53 SPL、U-Boot。Linux 驱动检查记录头、长度、阶段和 CRC32；仅仅存在 sysfs 目录不能判定通过。
+
+### AM625 实机结果（2026-11-03）
+
+将串口接入主机 `/dev/ttyACM2` 后，发现板上仍运行旧 SPL/U-Boot，三个阶段均为 `unavailable`。U-Boot TFTP 因 PHY 自协商超时未能下载，未写入启动分区。随后在 Linux 侧下载并验证 `bootloader.itb`，通过 `fwctl update bootloader` 只更新启动链；写入后逐一读回校验 `tiboot3_a`、`tispl_a` 和 `uboot_a`。deployment 0 启动、健康检查通过，已标记 `confirmed`。
+
+连续两次正常重启均验证 R5 SPL、A53 SPL 和 U-Boot 接力：`logctl verify-boot` 的三个结果全部为 `verified-by-kernel`；内核报告三段各 `0 dropped`。第二次启动的服务器 SOL 归档与物理串口捕获逐字节一致，分别为 324、227、2907 字节。Device Manager 页面能从归档中去掉采集元数据前缀，按阶段显示原始正文。两次启动有独立启动 ID，没有混入上次启动记录。
+
+本次验证覆盖正常重启；断电冷启动和容量溢出仍需单独测试。设备的 data 文件系统尚未配置，`logctl` 本地存储状态为 `volatile`；服务器 SQLite 已收到并保存这些日志，但不能据此认定设备本地具备断电持久性。ROM、TIFS 和 ATF 输出仍不属于当前接力范围。
