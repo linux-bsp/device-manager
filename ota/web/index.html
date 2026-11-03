@@ -56,7 +56,7 @@
 <div id="overview">
 <div class="tabs" role="tablist" aria-label="固件管理"><button type="button" role="tab" id="tab-manage" aria-controls="panel-manage" aria-selected="true" tabindex="0" data-tab="manage">上传与发布</button><button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1" data-tab="history">升级历史</button><button type="button" role="tab" id="tab-releases" aria-controls="panel-releases" aria-selected="false" tabindex="-1" data-tab="releases">发布记录</button><button type="button" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="false" tabindex="-1" data-tab="audit">异常审计</button></div>
 <div role="tabpanel" id="panel-manage" aria-labelledby="tab-manage">
-<section class="card"><div class="upload-layout"><div class="upload-main"><h2>上传固件</h2>
+<section class="card upload-card"><div class="upload-layout"><div class="upload-main"><h2>上传固件</h2>
 <p class="muted">上传后先保存为待发布版本，设备不会立即下载。</p>
 <form id="upload-form">
 <div class="upload-area"><label for="firmware"><strong>选择固件包（.tar.gz）</strong></label>
@@ -66,12 +66,7 @@
 <button id="upload-button" type="submit" disabled>上传并校验</button>
 <progress id="progress" max="100" value="0" hidden aria-label="上传进度"></progress>
 <p id="upload-status" class="muted" aria-live="polite"></p>
-</form></div><aside class="upload-sidebar"><div class="row"><div class="step">设备当前可获取的版本</div><button id="refresh" class="secondary" type="button">刷新</button></div>
-<div id="current-version" class="current">加载中…</div>
-<div id="current-details" class="muted"></div>
-<p class="muted" style="margin-top:18px">设备会检查已发布版本，完成升级并通过健康检查后上报结果。</p>
-</aside></div></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
-<div id="published-current" class="published-current" hidden><div><span id="published-current-status" class="pill good">设备当前可获取</span></div><div><strong id="published-current-version" class="published-current-version"></strong><div id="published-current-meta" class="muted"></div></div><a id="published-current-link">查看固件详情</a></div>
+</form></div></div></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
 <div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
 <div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
 </section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>
