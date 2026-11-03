@@ -182,13 +182,13 @@ setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await
 function restoreTab(){
  const detail=location.pathname==='/firmware';
  const route=detail?'firmware':location.hash.slice(1)||'dashboard';
- const dashboard=route==='dashboard',devices=route==='devices',sol=route==='sol',audit=route==='audit';
+ const dashboard=route==='dashboard',devices=route==='devices',sol=route==='sol';
  $('dashboard-panel').hidden=!dashboard||detail;$('devices-panel').hidden=!devices||detail;
  $('sol-panel').hidden=!sol||detail;$('overview').hidden=dashboard||devices||sol||detail;
- const pages={dashboard:['总览','设备状态、固件发布与最近事件。'],devices:['设备','固件身份、网络信息与升级结果。'],sol:['远程日志 SOL','只读启动日志与历史回放。'],audit:['事件与审计','固件异常、升级失败和自动回退。']};
+ const pages={dashboard:['总览','设备状态、固件发布与最近事件。'],devices:['设备','固件身份、网络信息与升级结果。'],sol:['远程日志 SOL','只读启动日志与历史回放。']};
  const [title,description]=pages[route]||['固件 OTA','上传固件、发布版本并追踪升级结果。'];
  $('module-title').textContent=detail?'固件详情':title;$('module-description').textContent=detail?'版本内容、下载量与设备升级统计。':description;
- for(const id of ['dashboard','devices','ota','sol','audit'])$('module-'+id).setAttribute('aria-current',(!detail&&((id===route)||(id==='ota'&&!pages[route])))||(detail&&id==='ota')?'page':'false');
+ for(const id of ['dashboard','devices','ota','sol'])$('module-'+id).setAttribute('aria-current',(!detail&&((id===route)||(id==='ota'&&!pages[route])))||(detail&&id==='ota')?'page':'false');
  selectTab(tabs.find(t=>t.dataset.tab===location.hash.slice(1))||tabs[0],false);
 }
 window.addEventListener('hashchange',restoreTab);restoreTab();
