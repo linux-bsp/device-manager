@@ -34,6 +34,7 @@ test: all
 	python3 ./tests/test-history.py
 	python3 ./tests/test-quarantine.py
 	python3 ./tests/test-shutdown.py
+	python3 ./tests/test-log-stop.py
 	python3 ./tests/test-cli.py
 	python3 ./tests/test-sol.py
 

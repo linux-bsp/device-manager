@@ -30,7 +30,7 @@ static char runtime[PATH_CAP], root[PATH_CAP], current[64], bootpath[PATH_CAP];
 static size_t file_limit = LIMIT;
 static volatile sig_atomic_t stopping;
 static unsigned long long sequence, synced_sequence;
-static int write_failure, last_sync_error;
+static int write_failure, last_sync_error, collector_stopped;
 static struct timespec last_storage_warning;
 static int pmsg_fd = -1;
 struct packet { char stage[16]; char data[CHUNK]; };
@@ -83,7 +83,7 @@ static void sync_status(const char *state, int error)
 {
     char path[PATH_CAP], temp[PATH_CAP], value[256];
     join(path,runtime,"sync-status"); join(temp,runtime,".sync-status.tmp");
-    snprintf(value,sizeof(value),"sync-state=%s\nsynced-sequence=%llu\nobserved-sequence=%llu\nsync-errno=%d\n",state,synced_sequence,sequence,error);
+    snprintf(value,sizeof(value),"collector-state=%s\nsync-state=%s\nsynced-sequence=%llu\nobserved-sequence=%llu\nsync-errno=%d\n",collector_stopped?"stopped":"running",state,synced_sequence,sequence,error);
     if(save_text(temp,value)||rename(temp,path)) {
         int saved=errno;unlink(temp);errno=saved;
         perror("[logctld] [ERROR] cannot record sync status");
@@ -411,7 +411,7 @@ static int daemon_main(int argc,char **argv)
         for(int i=0;i<20;i++){if(waitpid(forwarder,NULL,WNOHANG)==forwarder){forwarder=-1;break;}usleep(100000);}
         if(forwarder>0){kill(forwarder,SIGKILL);waitpid(forwarder,NULL,0);}
     }
-    scan_services();event("log collector stopped");sync_logs();close(sock);if(kmsg>=0)close(kmsg);
+    scan_services();event("log collector stopped");collector_stopped=1;sync_logs();close(sock);if(kmsg>=0)close(kmsg);
     join(p,runtime,"socket");unlink(p);close(lock);return 0;
 }
 /* exec preserves the command PID and exit status. The relay survives only as

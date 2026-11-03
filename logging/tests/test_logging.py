@@ -67,6 +67,17 @@ class Logging(unittest.TestCase):
         self.assertEqual(result.returncode,7)
         self.assertIn('early-message',result.stdout)
         self.start();self.wait(lambda:'early-message' in self.text())
+    def test_stop_confirms_final_sync_and_collector_exit(self):
+        self.start()
+        self.cli('write','services','last-record-before-stop',check=True)
+        self.wait(lambda:'last-record-before-stop' in self.text())
+        self.stop()
+        status=dict(line.split('=',1) for line in (self.run/'sync-status').read_text().splitlines())
+        self.assertEqual(status['collector-state'],'stopped')
+        self.assertEqual(status['sync-state'],'ok')
+        self.assertEqual(status['sync-errno'],'0')
+        self.assertEqual(status['synced-sequence'],status['observed-sequence'])
+        self.assertFalse((self.run/'socket').exists())
     def test_partial_console_bytes_are_preserved(self):
         self.start()
         fragments = [b'Starting CAN: ', b'OK\n\n   kernel\r\n',

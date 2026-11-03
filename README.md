@@ -66,6 +66,8 @@ AM625 启动脚本只尝试挂载已有的 `/dev/mmcblk1p15` ext4 文件系统�
 
 周期同步按单调时钟每 5 秒触发，检查当前启动文件及目录的同步返回值。`logctl status` 显示 `sync-state`、`synced-sequence`、`observed-sequence` 和 `sync-errno`；同步失败时保留此前已同步序号并限频告警，后续同步成功才更新序号。写入失败可能产生不完整记录，当前实现会保持错误状态直到重启采集器。这里的序号表示本次采集器完成同步的记录范围，不是服务器归档确认或掉电安全保证；CRC 分段恢复仍属后续工作。
 
+停止脚本等待采集器退出，最多等待 10 秒，并核对 `collector-state=stopped` 与 `sync-state=ok` 后才报告最终同步完成。超时、同步失败或仅有过期运行快照均返回错误，不强制杀进程后冒充同步成功。通过 `python3 ota/tests/test-log-stop.py` 验证停止顺序及失败分支。
+
 `fwctld` 检查下载文件及父目录同步，完整缓存复用时也重新确认同步。失败时不进入本轮安装流程，不把校验通过等同于持久化完成。可在原生主机运行 `make test-storage` 注入 EIO、ENOSPC、EROFS 验证这些边界；夹具通过测试进程的 `LD_PRELOAD` 生效，固件不包含故障注入开关。
 
 SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` 读取已校验快照。SPL/U-Boot 必须更新后才能产生这些记录；OTA 仅更新 kernel/rootfs 时不能验证新引导程序。initramfs 的日志通过移动 `/run` 留给主系统。
