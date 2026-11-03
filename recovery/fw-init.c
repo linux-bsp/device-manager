@@ -6,6 +6,7 @@
 #include <linux/watchdog.h>
 #include <openssl/evp.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,7 @@ struct settings {
     char server[256], product[64], layout[64], interface[32], root[2][128];
 };
 static int watchdog_fd = -1;
+static atomic_int watchdog_stop;
 /* /run moves across switch_root. Keep the fd open until exec so the final
  * handoff messages are retained even after /run moved to /newroot/run. */
 static int boot_log_fd = -1;
@@ -51,8 +53,20 @@ static void log_bytes(const char *s, size_t n)
 }
 static void log_message(const char *s)
 {
-    printf("[fwctl] [INFO] %s\n", s); fflush(stdout);
-    log_bytes("[fwctl] [INFO] ", sizeof("[fwctl] [INFO] ") - 1); log_bytes(s, strlen(s)); log_bytes("\n", 1);
+    char line[1024];
+    int len = snprintf(line, sizeof(line), "[fwctl] [INFO] %s\n", s);
+
+    if (len < 0 || len >= (int)sizeof(line)) return;
+    /* One console write keeps kernel printk from splitting a status line. */
+    size_t offset = 0;
+    while (offset < (size_t)len) {
+        ssize_t written = write(STDOUT_FILENO, line + offset,
+                                (size_t)len - offset);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) break;
+        offset += (size_t)written;
+    }
+    log_bytes(line, (size_t)len);
 }
 
 static int property(const char *dir, const char *name, void *data, size_t size)
@@ -168,9 +182,10 @@ static void dm_remove(void)
 static void *feed_watchdog(void *unused)
 {
     (void)unused;
-    for (;;) {
+    while (!atomic_load(&watchdog_stop)) {
         if (ioctl(watchdog_fd, WDIOC_KEEPALIVE, 0)) log_message("watchdog keepalive failed");
-        sleep(5);
+        for (unsigned i = 0; i < 5 && !atomic_load(&watchdog_stop); i++)
+            sleep(1);
     }
     return NULL;
 }
@@ -277,7 +292,7 @@ static void halt_recovery(const char *why)
         sleep(5);
     }
 }
-static int handoff(void)
+static int handoff(pthread_t thread, const char *rootfs_message)
 {
     /* The real root owns /run contents; leave a marker without claiming health. */
     FILE *file = fopen("/run/fw-init.verified", "w");
@@ -288,11 +303,16 @@ static int handoff(void)
         char dest[64]; snprintf(dest, sizeof(dest), "/newroot%s", mounts[i]);
         if (mount(mounts[i], dest, NULL, MS_MOVE, NULL)) return -1;
     }
+    /* nowayout keeps the watchdog armed. Drain its close diagnostics before
+     * printing the verified rootfs result on the shared serial console. */
+    atomic_store(&watchdog_stop, 1);
+    if (pthread_join(thread, NULL)) return -1;
+    if (close(watchdog_fd)) return -1;
+    watchdog_fd = -1;
+    log_message(rootfs_message);
     log_message("rootfs verification complete; boot health check still pending");
     log_message("watchdog remains armed; system_manager will resume servicing after switch_root");
     log_message("switch_root: starting verified rootfs /sbin/init");
-    /* CLOEXEC closes the watchdog fd. nowayout keeps it armed until the normal
-     * system_manager takes over; no magic close and no disable ioctl. */
     char *args[] = {"/bin/busybox", "switch_root", "-c", "/dev/console", "/newroot", "/sbin/init", NULL};
     execv(args[0], args); return -1;
 }
@@ -356,8 +376,16 @@ int fwctl_recovery_main(int argc, char **argv)
                         try_fallback();
                         halt_recovery("verified image lacks /sbin/init; content is not a bootable rootfs");
                     }
+                    char message[192];
+                    snprintf(message, sizeof(message),
+                        "stage=initramfs rootfs SHA256 verified: "
+                        "slot=%c version=v%u.%u.%u payload_sha256=%.8s "
+                        "dm_verity=active",
+                        'A' + slot, version >> 16,
+                        (version >> 8) & 255, version & 255,
+                        id.payload);
                     if (network) { char *down[]={"/sbin/ifdown",s.interface,NULL}; (void)run(down,NULL,0); }
-                    if (handoff()) halt_recovery("switch_root failed; rootfs was not marked good");
+                    if (handoff(thread, message)) halt_recovery("switch_root failed; rootfs was not marked good");
                 }
                 dm_remove();
             }
