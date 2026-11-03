@@ -71,7 +71,7 @@ try {
         assert.equal(r.status,200);
     }
     await rpc('Page.navigate',{url});
-    await until(()=>evaluate("document.querySelector('#current-version')?.textContent !== '加载中…' && !!document.querySelector('#firmware')"),'page state');
+    await until(()=>evaluate("document.querySelector('#service-health')?.textContent === '管理服务已连接' && !!document.querySelector('#firmware')"),'page state');
     assert(await evaluate("!document.querySelector('#dashboard-panel').hidden && document.querySelector('#metric-devices').textContent==='1' && document.querySelector('#metric-success').textContent==='1'"),'Dashboard summary');
     await screenshot('dashboard-desktop.png');
     await evaluate("document.querySelector('#module-devices').click()");
@@ -113,9 +113,9 @@ try {
         const state=await (await fetch(url+'/api/state')).json();
         return state.latest>before.latest;
     },'latest publication');
-    await until(()=>evaluate(`document.querySelector('#current-version').textContent===${JSON.stringify(expectedTag)} && !document.querySelector('[data-publish]')`),'published UI');
+    await until(()=>evaluate(`document.querySelector('#drafts .publishing')?.closest('tr').textContent.includes(${JSON.stringify(expectedTag)}) && !document.querySelector('[data-publish]')`),'published UI');
     const after=await (await fetch(url+'/api/state')).json();
-    assert(await evaluate("document.querySelector('.upload-main').getBoundingClientRect().right < document.querySelector('.upload-sidebar').getBoundingClientRect().left"),'Upload sidebar');
+    assert(await evaluate("document.querySelector('.upload-card').getBoundingClientRect().width > document.querySelector('#panel-manage').getBoundingClientRect().width-2 && document.querySelector('.upload-card').getBoundingClientRect().height < 200 && document.querySelector('#upload-button').getBoundingClientRect().left >= document.querySelector('#firmware').getBoundingClientRect().right"),'Full width horizontal upload strip');
     assert(await evaluate("document.querySelector('#drafts-table').closest('.card').getBoundingClientRect().width > document.querySelector('#panel-manage').getBoundingClientRect().width-2"),'Full width publishing');
     assert(await evaluate("!document.querySelector('#panel-manage').textContent.includes('01 /') && !document.querySelector('#panel-manage').textContent.includes('02 /')"));
     for(const tab of ['history','releases','audit','manage']){
@@ -151,7 +151,7 @@ try {
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#drafts-table th')].map(x=>x.textContent)"),['产品','固件版本','固件ID','大小','操作','详情']);
     await evaluate("document.querySelector('#tab-manage').click()");
     assert(await evaluate("!document.querySelector('#overview a.download')"),'Download only in details');
-    for(const table of ['drafts','releases'])assert(await evaluate(`document.querySelector('#${table} .publishing').disabled && document.querySelector('#${table} .publishing').textContent==='当前版本使用中' && getComputedStyle(document.querySelector('#${table} .publishing')).backgroundColor==='rgb(229, 231, 235)'`),'Grey current release button');
+    for(const table of ['drafts','releases'])assert(await evaluate(`document.querySelector('#${table} .publishing').disabled && document.querySelector('#${table} .publishing').textContent==='当前发布版本' && getComputedStyle(document.querySelector('#${table} .publishing')).backgroundColor==='rgb(229, 231, 235)'`),'Grey current release button');
     await screenshot('published-desktop.png');
     await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await pause(150);

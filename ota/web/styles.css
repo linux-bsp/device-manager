@@ -113,12 +113,18 @@ td button { margin-right: 8px; }
 .tabs button { border: 0; border-radius: 0; background: transparent; color: #5d7387; padding: 10px 16px; white-space: nowrap; }
 .tabs button:hover { background: #e8f0f4; }
 .tabs button[aria-selected=true] { background: transparent; box-shadow: inset 0 -3px var(--accent); color: #086d74; }
-.upload-card { max-width: 760px; padding: 18px 20px; }
-.upload-layout, .upload-main { min-width: 0; }
+.upload-card { width: 100%; display: grid; grid-template-columns: minmax(180px,.65fr) minmax(0,2fr); align-items: center; gap: 22px; padding: 18px 20px; }
+.upload-intro h2 { margin-bottom: 4px; }
+.upload-intro p { margin: 0; }
+#upload-form { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 18px; row-gap: 8px; }
+#upload-form > button { white-space: nowrap; }
+#upload-form > #file-info, #upload-form > progress, #upload-form > #upload-status { grid-column: 1 / -1; margin: 0; }
+#file-info:empty, #upload-status:empty { display: none; }
 .current { font-size: 28px; line-height: 1.25; margin: 12px 0 6px; font-weight: 720; }
 .step { color: #526f7b; font-size: 12px; font-weight: 700; }
-.upload-area { padding: 14px; margin: 12px 0; border: 1px dashed #9dbec4; border-radius: 9px; background: #f7fbfb; }
-input[type=file] { display: block; width: 100%; margin-top: 12px; font-size: 12px; }
+.upload-area { min-width: 0; }
+.upload-area .muted { font-size: 12px; margin-top: 5px; }
+input[type=file] { display: block; width: 100%; margin-top: 6px; font-size: 12px; }
 progress { width: 100%; height: 8px; margin-top: 15px; accent-color: var(--accent); }
 #file-info { overflow-wrap: anywhere; }
 #firmware-detail { max-width: 1100px; margin-left: auto; margin-right: auto; }
@@ -146,10 +152,12 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
   .workspace { margin-left: 0; }
   header { padding: 16px; min-height: 75px; }
   main { padding: 18px 14px 35px; }
-  .upload-card { padding: 15px; }
+  .upload-card { grid-template-columns: 1fr; gap: 12px; }
   .card { padding: 17px; }
 }
 @media (max-width: 540px) {
+  #upload-form { grid-template-columns: minmax(0,1fr); }
+  #upload-form > button { justify-self: start; }
   .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
   .metric { padding: 15px; }
   .metric-value { font-size: 22px; }

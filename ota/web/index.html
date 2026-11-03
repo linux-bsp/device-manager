@@ -56,17 +56,17 @@
 <div id="overview">
 <div class="tabs" role="tablist" aria-label="固件管理"><button type="button" role="tab" id="tab-manage" aria-controls="panel-manage" aria-selected="true" tabindex="0" data-tab="manage">上传与发布</button><button type="button" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1" data-tab="history">升级历史</button><button type="button" role="tab" id="tab-releases" aria-controls="panel-releases" aria-selected="false" tabindex="-1" data-tab="releases">发布记录</button><button type="button" role="tab" id="tab-audit" aria-controls="panel-audit" aria-selected="false" tabindex="-1" data-tab="audit">异常审计</button></div>
 <div role="tabpanel" id="panel-manage" aria-labelledby="tab-manage">
-<section class="card upload-card"><div class="upload-layout"><div class="upload-main"><h2>上传固件</h2>
-<p class="muted">上传后先保存为待发布版本，设备不会立即下载。</p>
+<section class="card upload-card">
+<div class="upload-intro"><h2>上传固件</h2><p class="muted">上传后保存为待发布版本。</p></div>
 <form id="upload-form">
 <div class="upload-area"><label for="firmware"><strong>选择固件包（.tar.gz）</strong></label>
-<div class="muted">包含 release.itb、kernel.itb 和 rootfs.itb，最大 512 MiB。</div>
 <input id="firmware" type="file" accept=".tar.gz,.tgz" required>
-<div id="file-info" class="muted"></div></div>
+<div class="muted">release.itb、kernel.itb、rootfs.itb · 最大 512 MiB</div></div>
 <button id="upload-button" type="submit" disabled>上传并校验</button>
+<div id="file-info" class="muted"></div>
 <progress id="progress" max="100" value="0" hidden aria-label="上传进度"></progress>
 <p id="upload-status" class="muted" aria-live="polite"></p>
-</form></div></div></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
+</form></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
 <div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
 <div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
 </section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>

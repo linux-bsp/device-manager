@@ -36,7 +36,15 @@ async function loadState(){
  const identity=d=>data.releases.find(r=>r.publication===d.publication)||{product:d.product,tag:fmt(d.version)};
  for(const [tab,list] of Object.entries(lists))$(list).replaceChildren();
  $('drafts-empty').hidden=true;$('releases-empty').hidden=true;
- const manageItems=[...data.drafts,...data.releases.filter(release=>release.published)];
+ const candidates=new Map();
+ const firmwareKey=item=>item.firmware_id?JSON.stringify([item.product,item.layout,item.tag||item.firmware_version,item.firmware_id]):item.id;
+ for(const draft of [...data.drafts].sort((a,b)=>b.created-a.created)){
+  const key=firmwareKey(draft);
+  if(!candidates.has(key))candidates.set(key,draft);
+ }
+ // The published snapshot replaces its uploaded draft in this table.
+ for(const release of data.releases.filter(item=>item.published))candidates.set(firmwareKey(release),release);
+ const manageItems=[...candidates.values()];
  for(const [items,tbody] of [[manageItems,'drafts'],[data.releases,'releases']]){
   for(const d of [...items].sort((a,b)=>tbody==='drafts'?(Number(!!b.published)-Number(!!a.published))||b.created-a.created||b.publication-a.publication:b.created-a.created||b.publication-a.publication)){
    const row=document.createElement('tr');if(tbody==='drafts')row.dataset.draft=d.id;
