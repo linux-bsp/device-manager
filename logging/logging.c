@@ -441,6 +441,7 @@ static int show_file(const char *path)
 }
 static int cli_main(int argc,char **argv)
 {
+    if(argc==2&&!strcmp(argv[1],"sync-time"))return sol_sync_time();
     if(argc==4&&!strcmp(argv[1],"forward")&&!strcmp(argv[2],"--root")&&argv[3][0]=='/')return sol_forward(argv[3]);
     if(argc>=4&&!strcmp(argv[1],"run"))return run_command(argv[2],argv+3);
     if(argc==4&&!strcmp(argv[1],"write")){if(stage_id(argv[2])<0)return 2;emit(argv[2],argv[3],strlen(argv[3]));return 0;}
@@ -451,6 +452,7 @@ static int cli_main(int argc,char **argv)
         printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream\n",current,mode,state,bootpath,KEEP_BOOTS);
         char status[PATH_CAP];join(status,runtime,"sync-status");
         if(access(status,F_OK))puts("sync-state=unknown");else if(show_file(status))return 1;
+        join(status,runtime,"clock-status");if(!access(status,R_OK)&&show_file(status))return 1;
         const char *handoff=getenv("LOGCTL_HANDOFF_DIR");if(!handoff)handoff="/sys/firmware/bootlog";
         join(status,handoff,"state");if(!access(status,R_OK)&&(show_file(status)))return 1;
         return 0;
@@ -496,7 +498,7 @@ static int cli_main(int argc,char **argv)
         execlp("tar","tar","-czf",output,"-C",root,boot,NULL);perror("tar");return 1;
     }
 usage:
-    fprintf(stderr,"Usage: logctl verify-storage | verify-boot\n"
+    fprintf(stderr,"Usage: logctl sync-time | verify-storage | verify-boot\n"
         "       logctl status | boots | show [--boot ID|previous] [--stage STAGE]\n"
         "       logctl follow [--boot ID|previous] [--stage STAGE]\n"
         "       logctl export [--boot ID|previous] --output /path/logs.tar.gz\n"

@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "sol-forward.h"
 #include "startup-forward.h"
+#include "time-sync.h"
 #include <curl/curl.h>
 #include <dirent.h>
 #include <errno.h>
@@ -19,8 +20,9 @@
 #define P 1024
 static volatile sig_atomic_t stopped;
 static char server[512], device[64], key[65], interface[32]="eth0";
+static int clock_enabled;
 static const char *stages[]={"r5-spl","a53-spl","uboot","initramfs","kernel","services","events"};
-static void stop_forward(int sig){(void)sig;stopped=1;}
+static void stop_forward(int sig){(void)sig;stopped=1;dm_time_sync_cancel();}
 static int safe(const char *s){if(!*s||strlen(s)>63)return 0;for(;*s;s++)if(!((*s>='a'&&*s<='z')||(*s>='0'&&*s<='9')||*s=='-'||*s=='_'))return 0;return 1;}
 static int read_text(const char *p,char *buf,size_t cap)
 {
@@ -31,12 +33,13 @@ static int config(void)
 {
     const char *path=getenv("LOGCTL_SOL_CONFIG");if(!path)path="/etc/device-manager/sol.conf";
     FILE *f=fopen(path,"r");if(!f)return -1;
-    char line[P],keyfile[P]="",auth_mode[8]="key";
+    char line[P],keyfile[P]="",auth_mode[8]="key",clock_mode[2]="0";
     server[0]=device[0]=key[0]=0;strcpy(interface,"eth0");
     while(fgets(line,sizeof(line),f)) {
         line[strcspn(line,"\r\n")]=0;char *eq=strchr(line,'=');if(!eq||line[0]=='#')continue;*eq++=0;
         char *dst=NULL;size_t cap=0;
-        if(!strcmp(line,"auth")){dst=auth_mode;cap=sizeof(auth_mode);}
+        if(!strcmp(line,"time-sync")){dst=clock_mode;cap=sizeof(clock_mode);}
+        else if(!strcmp(line,"auth")){dst=auth_mode;cap=sizeof(auth_mode);}
         else if(!strcmp(line,"server")){dst=server;cap=sizeof(server);}
         else if(!strcmp(line,"device")){dst=device;cap=sizeof(device);}
         else if(!strcmp(line,"key-file")){dst=keyfile;cap=sizeof(keyfile);}
@@ -45,6 +48,8 @@ static int config(void)
         if(strlen(eq)>=cap){fclose(f);return -1;}strcpy(dst,eq);
     }
     fclose(f);
+    if(strcmp(clock_mode,"0")&&strcmp(clock_mode,"1"))return -1;
+    clock_enabled=!strcmp(clock_mode,"1");
     size_t n=strlen(server);if(n&&server[n-1]=='/')server[n-1]=0;
     if((strncmp(server,"http://",7)&&strncmp(server,"https://",8))||strpbrk(server,"\r\n @?#")||!safe(interface))return -1;
     if(!*device){char p[P];snprintf(p,sizeof(p),"/sys/class/net/%s/address",interface);if(read_text(p,device,sizeof(device)))return -1;for(char *q=device;*q;q++)if(*q==':')*q='-';}
@@ -165,6 +170,8 @@ int sol_forward(const char *root)
     signal(SIGTERM,stop_forward);signal(SIGINT,stop_forward);signal(SIGPIPE,SIG_IGN);
     curl_global_init(CURL_GLOBAL_DEFAULT);int state=-1;
     while(!stopped){
+        if(clock_enabled)(void)dm_time_sync(server,interface,0);
+        if(stopped)break;
         int startup=startup_forward(device,post_path);
         int result=cycle(root);
         if(startup)result=-1;
@@ -172,4 +179,12 @@ int sol_forward(const char *root)
         for(int i=0;i<20&&!stopped;i++)usleep(250000);
     }
     curl_global_cleanup();close(lock);return 0;
+}
+
+int sol_sync_time(void)
+{
+    if(config()){fprintf(stderr,"[logctl] [ERROR] valid SOL server configuration required for time sync\n");return 1;}
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    int result=dm_time_sync(server,interface,1);
+    curl_global_cleanup();return result?1:0;
 }

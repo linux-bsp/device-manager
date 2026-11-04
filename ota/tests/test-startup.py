@@ -62,9 +62,12 @@ class Startup(unittest.TestCase):
         data={'uboot':b'U-Boot\r\n'}
         self.push('uboot',data['uboot']);manifest=self.manifest(data)
         self.assertEqual(self.push('commit',manifest)[0],200)
+        _,rows=self.request('/api/sol/devices')
+        received=rows[0]['archive_received_at'];self.assertGreater(received,1577836800)
         self.stop();self.start()
         self.assertEqual(self.push('uboot',data['uboot']),(200,{'next':8}))
         self.assertEqual(self.push('commit',self.manifest(data,current=0,recovery='next-healthy-boot'))[0],200)
+        _,rows=self.request('/api/sol/devices');self.assertEqual(rows[0]['archive_received_at'],received)
         self.assertEqual(self.push('commit',self.manifest(data,generation=2))[0],409)
         self.assertEqual(self.push('uboot',b'evil',8),(200,{'next':8}))
         with sqlite3.connect(self.feed/'sol.db') as db:

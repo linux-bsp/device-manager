@@ -37,3 +37,7 @@ ROM、TIFS、ATF 直接输出仍未接入；R5 的采集初始化前输出、内
 ## 验证
 
 在 workspace 运行 `python3 device-manager/tests/test_bootlog_abi.py`；在组件中运行 `python3 ota/tests/test-startup.py`、`python3 ota/tests/test-boot-health.py` 和 `node --test ota/tests/test-sol-console.cjs`。主机 HTTP 测试只使用隔离临时数据库；实机结论单独记录在 workspace 的 `docs/am62x/`。
+
+## 时间戳命名与校时
+
+服务器归档列表及 Web 下载文件现在按数据库中首次接收时间命名，显示北京时间并保留短 capture ID，例如 `2026-11-04_08-36-15+0800_startup_df6e92a1.log`。已有归档同样生效，内部 ID、原始字节与确认协议保留。该时间是服务器首次接收时间，不据此推测历史异常发生时刻；设备自动校时、RTC 和具体命名规则见 [设备校时与归档时间](time-sync.md)。

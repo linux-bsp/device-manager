@@ -181,7 +181,7 @@ fail:
         return code;
     }
     sqlite3_stmt *s=NULL;gen=0;
-    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta FROM (SELECT device,boot,ord,seen,peer,meta,0 archived FROM boots UNION ALL SELECT device,boot,0,seen,peer,meta,1 FROM startup_boots WHERE committed=1) ORDER BY device,archived,ord DESC,seen DESC",NULL,NULL,NULL,-1);
+    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta,archived FROM (SELECT device,boot,ord,seen,peer,meta,0 archived FROM boots UNION ALL SELECT device,boot,0,seen,peer,meta,1 FROM startup_boots WHERE committed=1) ORDER BY device,archived,ord DESC,seen DESC",NULL,NULL,NULL,-1);
     else {
         if(sscanf(path,"/api/sol/logs/%63[^/]/%63[^/]/%63[^/]/%lld%c",device,boot,stage,&offset,&extra)!=4||!identifier(device)||!identifier(boot)||(!stage_valid(stage)&&strcmp(stage,"all"))||offset<0)
             return reply(out,400,"{\"error\":\"Invalid log query\"}");
@@ -204,7 +204,9 @@ fail:
             fputs("{\"device\":",f);json_string(f,(const char*)sqlite3_column_text(s,0));
             fputs(",\"boot\":",f);json_string(f,(const char*)sqlite3_column_text(s,1));
             fprintf(f,",\"order\":%lld,\"seen\":%lld,\"peer\":",sqlite3_column_int64(s,2),sqlite3_column_int64(s,3));
-            json_string(f,(const char*)sqlite3_column_text(s,4));fputs(",\"meta\":",f);json_string(f,(const char*)sqlite3_column_text(s,5));fputs("}",f);
+            json_string(f,(const char*)sqlite3_column_text(s,4));
+            fprintf(f,",\"archive_received_at\":%lld",sqlite3_column_int(s,6)?sqlite3_column_int64(s,3):0);
+            fputs(",\"meta\":",f);json_string(f,(const char*)sqlite3_column_text(s,5));fputs("}",f);
         }else{
             fprintf(f,"{\"raw\":%s,\"id\":%lld,\"stage\":",gen?"true":"false",sqlite3_column_int64(s,0));json_string(f,(const char*)sqlite3_column_text(s,1));
             fprintf(f,",\"gen\":%lld,\"off\":%lld",sqlite3_column_int64(s,3),sqlite3_column_int64(s,4));
