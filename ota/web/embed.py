@@ -10,6 +10,7 @@ for marker, filename in (
     ("/* INLINE_STYLES */", "styles.css"),
     ("/* INLINE_SOL */", "sol-console.js"),
     ("/* INLINE_SOL_NAMES */", "sol-names.js"),
+    ("/* INLINE_HWID */", "hwid.js"),
     ("/* INLINE_APP */", "app.js"),
     ("/* INLINE_FLEET */", "fleet.js"),
     ("/* INLINE_CLOCK */", "clock.js"),

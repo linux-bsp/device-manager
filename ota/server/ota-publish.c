@@ -19,6 +19,8 @@ static int property(const char *fit, const char *node, const char *key, char *ou
 static int validate_fit(const char *directory, const struct release *r)
 {
     char fit[OTA_PATH], config[128], node[256], value[256];
+    char hwids[OTA_HWIDS_SIZE];
+    if (ota_fit_hwids(directory, hwids)) return -1;
     if (ota_path(fit, directory, "release.itb") ||
         property(fit, "/configurations", "default", config, sizeof(config)) ||
         !ota_identifier(config))

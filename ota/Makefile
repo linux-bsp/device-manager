@@ -1,16 +1,16 @@
 CC ?= cc
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
-INCLUDES = -I. -Iserver -Iagent -Ishared
+INCLUDES = -I. -Iserver -Iagent -Ishared -I../identity/include
 SERVER_SOURCES = $(wildcard server/*.c) shared/ota-common.c shared/ota-report.c
-SERVER_HEADERS = $(wildcard server/*.h shared/*.h)
+SERVER_HEADERS = $(wildcard server/*.h shared/*.h) ../identity/include/dm/hwid-value.h
 AGENT_SOURCES = $(wildcard agent/*.c) shared/ota-common.c shared/ota-report.c
 AGENT_HEADERS = $(wildcard agent/*.h shared/*.h)
 
 .PHONY: all test clean
 all: device-server fwctld ota-cli
 
-ota-page.h: web/index.html web/styles.css web/app.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py
+ota-page.h: web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py
 	python3 web/embed.py $@
 
 device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h
@@ -23,10 +23,11 @@ ota-cli: cli/ota-cli.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) cli/ota-cli.c $(LDFLAGS) -o $@
 
 test: all
-	node --test ./tests/test-sol-console.cjs ./tests/test-sol-names.cjs
+	node --test ./tests/test-sol-console.cjs ./tests/test-sol-names.cjs ./tests/test-hwid.cjs
 	sh ./tests/test-ota.sh
 	python3 ./tests/test-admin.py
 	python3 ./tests/test-catalog.py
+	python3 ./tests/test-hwid-catalog.py
 	python3 ./tests/test-auto.py
 	python3 ./tests/test-init.py
 	python3 ./tests/test-network.py

@@ -201,3 +201,5 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 .incident-startup strong { display: block; }
 .incident-startup p { overflow-wrap: anywhere; }
 .incident-sol-link { padding: 8px 2px; }
+.firmware-hwid + .firmware-hwid { margin-top: 12px; }
+.firmware-hwid code { font-size: 14px; font-weight: 600; }

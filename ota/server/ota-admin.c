@@ -360,10 +360,13 @@ static int list_entries(FILE *f, const char *root, int draft, unsigned long long
         if (count > 1)
             fputc(',', f);
         fprintf(f, "{\"id\":\"%s\",\"product\":\"%s\",\"layout\":\"%s\","
-            "\"firmware_version\":\"%s\",\"publication\":%llu,\"bytes\":%llu,\"created\":%lld,\"quarantined\":%s,\"tag\":\"v%s\",\"firmware_id\":\"%s\",\"uploaded_at\":%lld,\"valid\":%s,\"published\":%s}",
+            "\"firmware_version\":\"%s\",\"publication\":%llu,\"bytes\":%llu,\"created\":%lld,\"quarantined\":%s,\"tag\":\"v%s\",\"firmware_id\":\"%s\",\"uploaded_at\":%lld,\"valid\":%s,\"published\":%s,\"hwids\":[",
             entry->d_name, r.product, r.layout, identity.tag + 1, published,
             r.size[0] + r.size[1] + r.size[2], (long long)st.st_mtime, blocked ? "true" : "false", identity.tag + 1, identity.hash, identity.uploaded_at,
             blocked ? "false" : "true", published && published == active && !blocked ? "true" : "false");
+        for (size_t offset = 0; offset < strlen(identity.hwids); offset += 17)
+            fprintf(f, "%s\"%.16s\"", offset ? "," : "", identity.hwids + offset);
+        fputs("]}", f);
     }
     closedir(dir);
     return 0;

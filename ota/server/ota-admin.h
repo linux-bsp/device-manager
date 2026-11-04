@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdio.h>
 #define OTA_UPLOAD_MAX (512ULL * 1024 * 1024)
+#define OTA_HWID_LIMIT 256
+#define OTA_HWIDS_SIZE (OTA_HWID_LIMIT * 17)
+int ota_hwid_list_valid(const char *values);
+int ota_fit_hwids(const char *directory, char values[OTA_HWIDS_SIZE]);
 struct ota_report;
 struct ota_network_context {
     const char *ip, *mac, *hostname, *boot;
@@ -19,6 +23,7 @@ struct ota_catalog_identity {
     long long uploaded_at;
     unsigned long long kernel_bytes, rootfs_bytes;
     char tag[40], hash[65], kernel[65], rootfs[65];
+    char hwids[OTA_HWIDS_SIZE];
 };
 int ota_catalog_download(const char *root, unsigned long long publication, const char *device);
 int ota_catalog_downloads_json(const char *root, FILE *out);

@@ -10,7 +10,7 @@ function identityCells(row,item){cell(row,item.product||'未知');cell(row,item.
 function invalidButton(){const b=document.createElement('button');b.type='button';b.className='invalid';b.disabled=true;b.textContent='无效固件，禁止发布';b.title='固件已隔离，不能发布到设备';return b;}
 function publishingButton(){const b=document.createElement('button');b.type='button';b.className='publishing';b.disabled=true;b.textContent='当前发布版本';return b;}
 function activeTab(){return document.querySelector('[data-tab][aria-selected=true]')?.dataset.tab||'manage';}
-function searchable(row,item){row.dataset.search=JSON.stringify(item);}
+function searchable(row,item){row.dataset.search=JSON.stringify({...item,hwidLabels:(item.hwids||item.firmware?.hwids||[]).map(id=>FirmwareHardware.describe(id))});}
 const lists={manage:'drafts',history:'devices',releases:'releases',audit:'audit'};
 function filterRows(tab){const tokens=$('search-'+tab).value.trim().toLowerCase().split(/\s+/).filter(Boolean);let visible=0,total=0;for(const row of $(lists[tab]).children){total++;const text=((row.dataset.search||'')+' '+row.textContent).toLowerCase();row.hidden=!tokens.every(t=>text.includes(t));if(!row.hidden)visible++;}$('count-'+tab).textContent=`${visible} / ${total} 条`;$('empty-'+tab).hidden=visible>0;}
 function downloadLink(item){const link=document.createElement('a');link.className='download';link.textContent='下载固件包';link.href='/api/download/'+(item.id.startsWith('draft-')?'draft':'release')+'/'+encodeURIComponent(item.id);return link;}
@@ -146,6 +146,10 @@ function renderDetails(data){
  ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)],
  ['历史发布编号',publications.map(x=>'#'+x.publication).join('、')||'尚未发布']];
  for(const [key,value] of rows){const row=document.createElement('tr');cell(row,key);const td=cell(row,value);td.style.whiteSpace='normal';td.style.overflowWrap='anywhere';table.append(row);}
+ const hwidRow=document.createElement('tr');cell(hwidRow,'适用 HWID');const hardware=cell(hwidRow,'');hardware.style.whiteSpace='normal';hardware.style.overflowWrap='anywhere';
+ for(const id of item.hwids||[]){const entry=document.createElement('div');entry.className='firmware-hwid';const code=document.createElement('code');code.textContent=id;const fields=document.createElement('div');fields.className='muted';fields.textContent=FirmwareHardware.describe(id);entry.append(code,fields);hardware.append(entry);}
+ if(!hardware.childElementCount)hardware.textContent='未声明（历史固件，无法按 HWID 核对）';
+ table.insertBefore(hwidRow,table.children[4]);
  const note=document.createElement('p');note.className='muted';note.textContent='统计按相同内容哈希汇总。下载按 rootfs.itb 完整响应计次，重试和恢复下载会再次计数；不代表安装成功。未携带设备 ID 的请求单列，旧版本启用统计前的下载无法追溯。升级结果按每次升级事务最终状态计数，成功必须经过重启健康确认。';pane.append(note);
  const heading=document.createElement('h2');heading.textContent='失败与设备异常原因';pane.append(heading);
  const errors=failures.concat(incidents).sort((a,b)=>b.updated-a.updated);

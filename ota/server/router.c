@@ -119,7 +119,7 @@ static void upload(int client, unsigned long long length, const struct server_co
     if (ota_draft_finish(context->directory, temp, id)) {
         ota_draft_cleanup(temp);
         http_json(client, 422, "Unprocessable Content",
-            "{\"error\":\"固件包校验失败。请上传包含 release.itb、kernel.itb、rootfs.itb 的 tar.gz；检查 FIT 版本、产品及组件 SHA256 是否匹配。\"}", false);
+            "{\"error\":\"固件包校验失败。请上传包含 release.itb、kernel.itb、rootfs.itb 的 tar.gz；检查 FIT 版本、产品、HWID 声明及组件 SHA256 是否匹配。\"}", false);
         return;
     }
     char json[128];

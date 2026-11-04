@@ -26,6 +26,8 @@ static int database(const char *root)
         "path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, version INTEGER NOT NULL,"
         "tag TEXT NOT NULL, firmware_id TEXT NOT NULL, kernel_sha256 TEXT NOT NULL,"
         "rootfs_sha256 TEXT NOT NULL, kernel_bytes INTEGER NOT NULL, rootfs_bytes INTEGER NOT NULL, uploaded_at INTEGER NOT NULL, verified_at INTEGER NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS firmware_hardware ("
+        "path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, hwids TEXT NOT NULL);"
         "CREATE TABLE IF NOT EXISTS firmware_downloads (id INTEGER PRIMARY KEY,"
         "publication INTEGER NOT NULL, device TEXT NOT NULL, completed_at INTEGER NOT NULL);"
         "CREATE INDEX IF NOT EXISTS downloads_publication ON firmware_downloads(publication);"
@@ -67,6 +69,34 @@ static int hash_string(const char *s)
     return s && strlen(s) == 64 && strspn(s, "0123456789abcdef") == 64;
 }
 
+/* Backfill old catalogs once without rehashing payloads. Warm UI reads use SQL. */
+static int hardware(const char *directory, const char *before, char hwids[OTA_HWIDS_SIZE])
+{
+    sqlite3_stmt *query = NULL;
+    const char *sql = "SELECT hwids FROM firmware_hardware WHERE path=?1 AND fingerprint=?2";
+    if (sqlite3_prepare_v2(catalog, sql, -1, &query, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_text(query, 1, directory, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(query, 2, before, -1, SQLITE_TRANSIENT);
+    int result = sqlite3_step(query), valid = 0;
+    if (result == SQLITE_ROW) {
+        const char *text = (const char *)sqlite3_column_text(query, 0);
+        if (text && ota_hwid_list_valid(text)) { strcpy(hwids, text); valid = 1; }
+    }
+    sqlite3_finalize(query);
+    if (valid) return 0;
+    if (result != SQLITE_DONE && result != SQLITE_ROW) return -1;
+    char after[1536];
+    if (ota_fit_hwids(directory, hwids) || fingerprint(directory, after) || strcmp(before, after)) return -1;
+    sql = "INSERT OR REPLACE INTO firmware_hardware(path,fingerprint,hwids) VALUES(?1,?2,?3)";
+    if (sqlite3_prepare_v2(catalog, sql, -1, &query, NULL) != SQLITE_OK) return -1;
+    sqlite3_bind_text(query, 1, directory, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(query, 2, before, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(query, 3, hwids, -1, SQLITE_TRANSIENT);
+    result = sqlite3_step(query);
+    sqlite3_finalize(query);
+    return result == SQLITE_DONE ? 0 : -1;
+}
+
 int ota_catalog_get(const char *root, const char *directory, struct ota_catalog_identity *identity)
 {
     char before[1536], after[1536], body[512], extra;
@@ -100,7 +130,7 @@ int ota_catalog_get(const char *root, const char *directory, struct ota_catalog_
         }
     }
     sqlite3_finalize(query);
-    if (valid) return 0;
+    if (valid) return hardware(directory, before, identity->hwids);
     if (result != SQLITE_DONE && result != SQLITE_ROW) return -1;
     unsigned long long publication, sizes[2]; unsigned version;
     if (ota_image_identity(directory, 1, body, sizeof(body)) ||
@@ -138,7 +168,7 @@ int ota_catalog_get(const char *root, const char *directory, struct ota_catalog_
     sqlite3_bind_int64(query, 10, (sqlite3_int64)identity->rootfs_bytes);
     result = sqlite3_step(query);
     sqlite3_finalize(query);
-    return result == SQLITE_DONE ? 0 : -1;
+    return result == SQLITE_DONE ? hardware(directory, before, identity->hwids) : -1;
 }
 
 int ota_catalog_download(const char *root, unsigned long long publication, const char *device)
