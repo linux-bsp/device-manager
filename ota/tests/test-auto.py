@@ -70,6 +70,7 @@ class AutomaticOTA(unittest.TestCase):
     def agent(self, ok=True, force=False):
         r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
             '--cache', str(self.root/'cache'), '--hwid', '1010001000110000',
+            '--state-dir', str(self.root/'state'),
             '--auto-install', '--device', 'board-01', '--once'] + (['--force'] if force else []), env=self.env, capture_output=True, text=True)
         if ok: self.assertEqual(r.returncode, 0, r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode, 0, r.stdout+r.stderr)
@@ -129,6 +130,20 @@ class AutomaticOTA(unittest.TestCase):
     def phase(self):
         return self.state()['devices'][0]['phase']
 
+    def journal_directory(self):
+        return self.root/'state/1010001000110000/board-01'
+
+    def assert_reboot_queued(self):
+        self.assertEqual(self.phase(), 'installing')
+        record=(self.journal_directory()/'transaction').read_text()
+        self.assertIn(' rebooting ',record)
+        self.assertTrue(list(self.journal_directory().glob('*.event')))
+
+    def disconnect_server(self):
+        wrapper=self.bin/'curl'
+        wrapper.write_text('#!/bin/sh\nexit 7\n');wrapper.chmod(0o755)
+        return wrapper
+
     def reject_payload_requests(self):
         curl=self.bin/'curl';real=shutil.which('curl',path=admin.ENV['PATH'])
         self.unexpected_download=self.root/'unexpected-download'
@@ -138,7 +153,7 @@ class AutomaticOTA(unittest.TestCase):
     def test_auto_success_waits_for_confirmation(self):
         self.agent()
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
-        self.assertEqual(self.phase(), 'rebooting')
+        self.assert_reboot_queued()
         self.write_snapshot('FWOTA1 1 0 1 65536 1 4 65537 0 3\n')
         shutil.rmtree(self.root/'cache')
         boot_result=self.agent()
@@ -220,7 +235,7 @@ class AutomaticOTA(unittest.TestCase):
         wrapper.unlink()
         result = self.agent()
         self.assertIn('Resuming kernel.itb at byte', result.stdout)
-        self.assertEqual(self.phase(), 'rebooting')
+        self.assert_reboot_queued()
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
         self.assertEqual(self.state()['latest'], 1)
 
@@ -293,7 +308,7 @@ class AutomaticOTA(unittest.TestCase):
         fw = self.bin/'fwctl'
         fw.write_text(fw.read_text().replace('65537 0 2', '65538 0 2'))
         self.agent()
-        self.assertEqual(self.phase(), 'rebooting')
+        self.assert_reboot_queued()
         self.assertEqual(self.state()['devices'][0]['publication'], 2)
         status, body = self.request('GET', '/api/policy/board-01/1')
         self.assertEqual(status, 200)
@@ -309,7 +324,7 @@ class AutomaticOTA(unittest.TestCase):
         self.publish(self.draft(self.bundle(self.fixture(65538))))
         fw=self.bin/'fwctl'
         self.agent()
-        self.assertEqual(self.phase(),'rebooting')
+        self.assert_reboot_queued()
         self.assertEqual(self.state()['devices'][0]['publication'],2)
         self.assertTrue((self.root/'cache/1010001000110000/2/rootfs.itb').exists())
         self.assertEqual(self.calls.read_text(),'install\nreboot\ninstall\nreboot\n')
@@ -320,6 +335,109 @@ class AutomaticOTA(unittest.TestCase):
         self.assertFalse(self.state()['devices'])
         self.assertFalse((self.root/'cache/1010001000110000/1').exists())
         self.assertFalse(self.calls.exists())
+
+    def test_offline_boot_and_confirmation_replay_all_events_after_cache_loss(self):
+        self.agent();self.assert_reboot_queued()
+        wrapper=self.disconnect_server()
+        shutil.rmtree(self.root/'cache')
+        self.write_snapshot('FWOTA1 1 0 1 65536 1 4 65537 0 3\n')
+        self.agent();self.assertIn(' boot-testing ',(self.journal_directory()/'transaction').read_text())
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        self.agent();self.assertIn(' success ',(self.journal_directory()/'transaction').read_text())
+        self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        wrapper.unlink();self.agent()
+        self.assertEqual(self.phase(),'success')
+        self.assertFalse(list(self.journal_directory().glob('*.event')))
+        phases=[e['phase'] for e in self.state()['device_history'][0]['events']]
+        self.assertEqual(phases,['installing','rebooting','boot-testing','success'])
+
+    def test_offline_rollback_is_queued_and_never_reinstalled(self):
+        self.agent();wrapper=self.disconnect_server()
+        self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
+        self.agent();self.agent()
+        self.assertIn(' rolled-back ',(self.journal_directory()/'transaction').read_text())
+        self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        wrapper.unlink();self.agent()
+        self.assertEqual(self.phase(),'rolled-back');self.assertEqual(self.state()['latest'],0)
+
+    def test_corrupt_local_journal_blocks_writes_and_preserves_evidence(self):
+        self.agent();path=self.journal_directory()/'transaction'
+        original=path.read_bytes();path.write_bytes(original[:-2]+b'Z\n')
+        events=list(self.journal_directory().glob('*.event'))
+        result=self.agent(ok=False);self.assertIn('damaged or unreadable',result.stdout+result.stderr)
+        self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        self.assertEqual(list(self.journal_directory().glob('*.event')),events)
+        self.assertEqual(self.state()['latest'],0)
+        self.assertEqual(self.state()['device_history'][0]['reason'],'data-ota-state-corrupt')
+
+    def test_unavailable_local_state_never_starts_flash_write(self):
+        (self.root/'state').write_text('not a directory')
+        result=self.agent(ok=False);self.assertIn('automatic writes deferred',result.stdout+result.stderr)
+        self.assertFalse(self.calls.exists());self.assertEqual(self.state()['latest'],1)
+
+    def test_lost_state_store_reports_only_a_data_failure_for_known_transaction(self):
+        self.agent();(self.root/'state').rename(self.root/'saved-state')
+        (self.root/'state').write_text('not a directory')
+        self.agent(ok=False)
+        self.assertEqual(self.phase(),'device-error')
+        self.assertEqual(self.state()['device_history'][0]['reason'],'data-ota-state-unavailable')
+        self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        self.assertEqual(self.state()['latest'],0)
+
+    def test_report_endpoint_failure_does_not_gate_install_or_reboot(self):
+        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
+        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\na=sys.argv[1:]\n'
+            'if "--data-binary" in a and "/api/devices/" in a[a.index("--url")+1]:sys.exit(7)\n'
+            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        self.agent();self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        self.assertFalse(self.state()['devices'])
+        self.assertIn(' rebooting ',(self.journal_directory()/'transaction').read_text())
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        wrapper.unlink();self.agent();self.assertEqual(self.phase(),'success')
+        self.assertEqual([e['phase'] for e in self.state()['device_history'][0]['events']],
+                         ['installing','rebooting','success'])
+
+    def test_withdrawal_after_download_prevents_flash_transaction(self):
+        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
+        channel=self.feed/'channels/1010001000110000'
+        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\nfrom pathlib import Path\na=sys.argv[1:]\n'
+            'if a[a.index("--url")+1].endswith("/rootfs.itb"):\n'
+            f' Path({str(channel)!r}).unlink(missing_ok=True)\n'
+            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        self.agent(ok=False);self.assertFalse(self.calls.exists())
+
+    def test_stopping_during_flash_is_recorded_without_quarantining_firmware(self):
+        waiting=self.root/'flash-waiting'
+        fw=self.bin/'fwctl';fw.write_text(fw.read_text().replace('update) echo install',
+            f'update) touch "{waiting}"; while :; do sleep .1; done; echo install'))
+        process=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.port}',
+            '--cache',str(self.root/'cache'),'--state-dir',str(self.root/'state'),
+            '--hwid','1010001000110000','--auto-install','--device','board-01','--once'],
+            env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(150):
+                if waiting.exists():break
+                time.sleep(.02)
+            self.assertTrue(waiting.exists())
+            process.terminate();self.assertEqual(process.wait(timeout=10),0)
+        finally:
+            if process.poll() is None:process.kill();process.wait()
+        self.assertIn(' cancelled ',(self.journal_directory()/'transaction').read_text())
+        self.assertEqual(self.state()['latest'],1)
+        self.assertEqual(self.state()['audit_events'],[])
+        self.assertFalse(self.calls.exists())
+
+    def test_report_replay_refuses_a_replaced_server_content_identity(self):
+        self.agent()
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
+        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\na=sys.argv[1:]\n'
+            'if a[a.index("--url")+1].endswith("/releases/1/version"):\n'
+            ' print("BSPOTAVERSION1 1 v1.0.1 "+"c"*64);sys.exit(0)\n'
+            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        self.agent();self.assertEqual(self.phase(),'installing')
+        self.assertTrue(list(self.journal_directory().glob('*.event')))
+        wrapper.unlink();self.agent();self.assertEqual(self.phase(),'success')
 
     def test_matching_version_corrupt_contents_reinstalled(self):
         self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')

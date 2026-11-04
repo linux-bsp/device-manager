@@ -10,7 +10,7 @@
 缓存打开、写入、读取、同步失败上报 `device-error / cache-storage-failed`；内容长度越界或
 SHA256 不匹配上报 `verify-failed / download-sha256-mismatch`，后者删除损坏文件。
 真实设备异常和完整性错误继续遵守既有的停发、隔离和健康版本回退策略。
-主动停止 daemon 不会作为故障上报。升级前先部署支持上述事件的主机服务，再发布设备固件。
+主动停止 daemon 记录 cancelled，不作为固件故障隔离。升级前先部署支持上述事件的主机服务，再发布设备固件。
 
 - `device-server`：提供固件上传与发布管理网页，以及设备查询/下载接口。
 - `ota-cli`：C 命令行客户端，通过 HTTP 查看状态、上传固件包和发布草稿，适合 SSH/无图形界面环境。
@@ -112,18 +112,17 @@ make -C buildroot BR2_EXTERNAL=../bsp-base-external alientek_am62x_defconfig
 make -C buildroot
 ```
 
-既有输出目录首次启用该包时，使用 `menuconfig` 选择 `fwctld`，再执行 `libcurl-reconfigure busybox-reconfigure fwctld` 和完整构建。
+既有输出目录首次启用该包时，使用 `menuconfig` 选择 `fwctld`，再执行 `device-manager-rebuild` 和完整构建。
 
-设备需先准备可写且容量足够的缓存目录。默认使用 `/data/fwctld`，它位于持久化 data 分区，未完成下载可在断电重启后继续。若 data 分区未挂载，启动脚本会记录警告并退回 `/tmp/fwctld`，OTA 仍可工作，但断电后未完成的下载无法续传。当前 AM625 实机启动日志显示 data 分区尚不可写；要在该设备验证跨断电续传，需要先单独准备可写的 data 文件系统，不能由升级脚本自动格式化。
-
+下载缓存默认 `/data/fwctld`；data 未挂载、只读或空间不足时，启动脚本退回 `/tmp/fwctld`，此时未完成下载不能跨重启续传。小型事务日志独立保存到 `/data/fwctld-state`，不会随下载缓存降级到 RAM。只有本地事务能够同步持久化，自动安装才会开始；不自动格式化或调整分区。
 ```sh
 mkdir -p /data/fwctld
 fwctld --server http://192.168.10.246:8090 \
-    --product ti-am62x --layout am62x-sd-ab-v1 \
+    --hwid "$(fwctl hwid value)" --state-dir /data/fwctld-state \
     --cache /data/fwctld --interval 60
 ```
 
-加 `--once` 则只检查一次。尚未发布时会报告检查失败并等待下次重试。下载完整且校验通过后，生成 `/data/fwctld/<发布编号>/` 和 `current`；`current` 只表示下载完成，不代表已安装或启动成功。
+加 `--once` 则只检查一次。尚未发布时正常等待下次检查。下载完整且校验通过后，生成 `/data/fwctld/<HWID>/<发布编号>/` 和同目录的 `current`；`current` 只表示下载完成，不代表已安装或启动成功。
 
 重复检查不会重新下载同一发布，但会验证缓存。下载暂存目录为 `.download-<发布编号>`，每个文件按服务端 Range 响应续传；中断后保留已下载字节，完整下载后仍逐文件校验 SHA256。文件校验失败会丢弃该文件并重新下载，失败下载不会替换之前的 `current`。若正在下载时突然断电，最终 SHA256 校验仍会检测未落盘或损坏的数据。
 
@@ -134,9 +133,8 @@ fwctld --server http://192.168.10.246:8090 \
 ```sh
 FWCTLD_ENABLED=1
 FWCTLD_SERVER="http://192.168.10.246:8090"
-FWCTLD_PRODUCT="ti-am62x"
-FWCTLD_LAYOUT="am62x-sd-ab-v1"
 FWCTLD_CACHE="/data/fwctld"
+FWCTLD_STATE="/data/fwctld-state"
 FWCTLD_INTERVAL=15
 FWCTLD_AUTO_INSTALL=1
 FWCTLD_DEVICE_ID=""  # 默认使用 eth0 的 MAC，将冒号替换为连字符
@@ -149,43 +147,49 @@ FWCTLD_DEVICE_ID=""  # 默认使用 eth0 的 MAC，将冒号替换为连字符
 /etc/init.d/S98fwctld stop
 mkdir -p /data/fwctld
 fwctld --server http://192.168.10.246:8090 \
-    --product ti-am62x --layout am62x-sd-ab-v1 \
+    --hwid "$(fwctl hwid value)" --state-dir /data/fwctld-state \
     --cache /data/fwctld --auto-install --device 1c-63-49-22-c4-f7 --once
 ```
 
 `--once --auto-install` 也会实际安装并重启；不带 `--auto-install` 则只下载。正常后台运行去掉 `--once`，或启动 init 服务。
 
-自动安装条件：当前 deployment 已确认且没有 pending 更新。设备先获取当前发布的身份信息，调用 `fwctl ota-check` 比较当前启动 deployment 的版本和实际存储内容；版本与 kernel/rootfs SHA256 都一致时跳过下载，否则安装当前发布。发布编号只用于历史记录，不作为“已处理就永远跳过”的依据。内核按 FIT 的有效总长度校验，rootfs 按 FIT 中实际写入的 payload 长度校验，不包含分区剩余空间。服务器先持久保存 `installing` 事务，设备才调用 `fwctl update`；写入备用槽并核对 pending 版本后，服务器保存 `rebooting`，设备才重启。服务器不可达或本地状态读取失败时等待重试，不启动新的安装。
+自动安装条件：当前 deployment 已确认且没有 pending 更新。设备先获取当前发布的身份信息，调用 `fwctl ota-check` 比较当前启动 deployment 的版本和实际存储内容；版本与 kernel/rootfs SHA256 都一致时跳过下载，否则安装当前发布。发布编号只用于历史记录，不作为“已处理就永远跳过”的依据。内核按 FIT 的有效总长度校验，rootfs 按 FIT 中实际写入的 payload 长度校验，不包含分区剩余空间。写入前再次检查当前发布和隔离策略，然后先持久保存本地 installing 事务。备用槽写入、同步和读回验证后，设备持久保存 rebooting 并重启，不以服务器 ACK 为门槛。开始写入前网络策略不可确认时等待重试；提交后的本地动作使用已保存的完整版本与内容 ID。
 
 重启后通过 `fwctl ota-status` 核对实际启动的 deployment。`S99fw-mark-good` 仍负责健康检查，fwctld 不强行确认。网页“设备升级历史”保留每次升级，点击“刷新”获取，并可展开各阶段上报时间：
 
 | 状态 | 含义 |
 | --- | --- |
 | `installing` | 已登记事务，正在调用 fwctl |
-| `rebooting` | 备用槽已写入并核对，等待重启 |
+| `rebooting` | 备用槽已写入并核对，已持久记录重启意图；上报可能晚于重启 |
 | `boot-testing` | 新版本已启动，健康检查尚未确认 |
 | `success` | 目标 deployment、版本和健康确认均匹配 |
 | `install-failed` | 安装或安装后状态核对失败 |
 | `rolled-back` | 目标 deployment 已失败，设备回到旧版本 |
 | `interrupted` | 事务中断，未找到可继续的 pending 更新 |
 | `reboot-failed` | reboot 命令失败，需要排查 |
+| `cancelled` | 主动停止 agent；保留记录，不隔离固件 |
 | `up-to-date` | 早期设备上报的无需安装状态；新版通过实际内容校验跳过，不新增升级事务 |
 
 同一个失败发布不会自动反复安装；排障后重新发布生成新编号。未确认的启动一直保留 `boot-testing`，由现有健康/看门狗策略处理，不误报成功。离线时服务器保留最后一次上报，不能把旧结果当作设备在线状态。设备恢复联网后继续核对和上报。
 
-事务保存在服务器 `devices/<设备ID>`，使用临时文件、fsync 和原子替换；重启清空 `/tmp` 不会丢失安装事务。备份服务器时应同时备份 `devices/`、`history/` 和 `releases/`。自动安装模式先核对服务器事务和本机启动健康状态，再比较版本和实际内容；缓存清空不影响一致判断。失败、回滚后内容仍不一致时，会在下一次检查重新尝试当前发布；不要让已知不可启动的固件持续作为服务器目标。仅下载模式仍按本地缓存决定是否下载。`history/<设备ID>/<发布编号>-<来源boot-id>` 原子保存该次升级的状态变化和服务器接收时间，重复上报相同状态不会增加记录。历史先持久化，再更新最近事务并响应设备；后续升级不会覆盖旧记录，重启服务器也会保留。首次启用时迁移原有最近状态并标记为旧数据，不会重建过去已经被覆盖的记录。页面只展示实际收到的上报，离线期间未上报的阶段不会补造。尚无设备身份认证。
+本地事务与待上报事件位于 `FWCTLD_STATE/<HWID>/<设备ID>/`。`transaction` 保存最后状态，按序号命名的 `*.event` 保存未 ACK 的真实阶段。事件先同步，再原子替换事务快照并同步目录；中断后可从已同步事件恢复。CRC32 保护记录完整性，固件匹配仍使用完整 SHA256。顺序补报后才删除对应事件；相同阶段不重复写入。最多保留 64 条待报事件，满额、损坏或同步失败时保留证据并暂停新的自动写入，不丢弃未确认事件。
+
+缓存清空不影响本地事务。启动检查、健康结果和回退可在离线时记录；联网后按顺序补报。补报前核对服务端发布的 tag 和完整内容 ID，避免服务端目录恢复后编号碰巧相同。失败事件尚未补报时，不进入下一次安装。升级到本实现的首次启动可采用旧 agent 已保存在服务端的进行中事务；之后新发起的升级直接使用本地记录。
+
+服务器 `devices/<设备ID>` 保存最近状态，`history/<设备ID>/<发布编号>-<来源boot-id>` 保存全部阶段及服务器接收时间。补报时间不冒充设备事件发生时间。重复的相同状态不增加历史记录，后续升级不覆盖旧历史。备份应包含整个 feed，含 devices、history、releases、审计和 SQLite 数据库。已隔离固件不会因重新上传或重启设备而被自动重试。调试模式仍无设备凭据认证。
 
 手动模式仍可使用：
 
 ```sh
-read marker publication product layout < /tmp/fwctld/current
-[ "$marker" = BSPOTA1 ] && fwctl update "/tmp/fwctld/$publication/release.itb"
+cache=/data/fwctld/$(fwctl hwid value)
+read marker publication hwid < "$cache/current"
+[ "$marker" = BSPOTA2 ] && fwctl update "$cache/$publication/release.itb"
 # 确认命令成功后执行 reboot。
 ```
 
 ## U-Boot 主动请求内核恢复包
 
-需要更新包含这些修改的 U-Boot；仅升级 kernel/rootfs 不会升级 U-Boot。AM625 A53 配置启用 HTTP/TCP，环境版本升级到 5，正常 eMMC 启动使用 `fw load-kernel` 读取并验证 FIT。出现读错误、FIT 格式错误、哈希或版本检查失败时，自动调用一次 `fw recover-kernel`。
+需要更新包含这些修改的 U-Boot；仅升级 kernel/rootfs 不会升级 U-Boot。AM625 A53 配置启用 HTTP/TCP，环境版本为 8，正常 eMMC 启动使用 `fwctl load-kernel` 读取并验证 FIT。出现读错误、FIT 格式错误、哈希或版本检查失败时，自动调用一次 `fwctl recover-kernel`。
 
 U-Boot 中配置（地址按实际网络修改）：
 
@@ -202,15 +206,15 @@ saveenv
 `ota_serverip` 未设置时使用 `serverip`；`ota_recovery` 默认 1。调试用 TFTP/NFS 启动路径不触发自动修复。也可以主动检查及修复所选内核：
 
 ```text
-fw select
-fw recover-kernel
+fwctl select
+fwctl recover-kernel
 ```
 
 设备从可信 metadata 获取固件版本和完整内容 ID，向 `/recovery/<product>/<layout>/kernel/<版本整数>/<固件ID>/kernel.itb` 请求，例如版本 1.0.2 对应 65538。服务器只从已发布历史中返回相同产品、布局、版本和固件 ID 的包；找不到返回 404，绝不使用最新版或同版本的其他构建替代。U-Boot 还会将下载 FIT 的完整 SHA256 与 metadata 绑定值比较后才写分区。应长期保留设备可能运行的历史包。initramfs 在当前 rootfs 验证通过后也检查另一 rootfs 槽；若其 metadata 身份完整且内容损坏，会尝试通过对应版本+固件 ID+payload SHA256 恢复。修复后的备用 deployment 仍保持 failed，需经常规升级/健康确认后才可启动。
 
 下载大小受分区大小限制；U-Boot 验证 FIT 哈希、既有签名策略、产品、布局、组件类型、版本、rollback index 和已记录构建时间，再修复**原本损坏的内核槽**并读回验证。保留另一槽、rootfs 和 A/B metadata。健康内核不重复刷写。修复成功后重新加载并启动；下载、校验或存储写入失败则不继续 bootm，保留现有启动失败/看门狗行为。
 
-U-Boot 恢复入口覆盖内核读入/完整性故障。rootfs 损坏由 kernel FIT 内独立的 initramfs 恢复环境处理，见 [AM625 恢复说明](../../board/ti/am625/verified-boot.md)。物理存储永久故障不能靠重刷修复。metadata 丢失或工厂初始化后的内核版本为 0 时无法确定匹配包，会拒绝自动恢复。恢复结果显示在 U-Boot 串口；网页设备结果表针对 Linux fwctld 的 OTA 事务，不表示 U-Boot 恢复遥测。
+U-Boot 恢复入口覆盖内核读入/完整性故障。rootfs 损坏由 kernel FIT 内独立的 initramfs 恢复环境处理，见 [AM625 恢复说明](../../bsp-base-external/board/ti/am625/verified-boot.md)。物理存储永久故障不能靠重刷修复。metadata 丢失或工厂初始化后的内核版本为 0 时无法确定匹配包，会拒绝自动恢复。恢复结果显示在 U-Boot 串口；网页设备结果表针对 Linux fwctld 的 OTA 事务，不表示 U-Boot 恢复遥测。
 
 HTTP 端口处理遵循当前 U-Boot legacy 网络栈的 `httpdstp`，恢复命令临时设置并恢复它，参见 [U-Boot wget 文档](https://docs.u-boot.org/en/stable/usage/cmd/wget.html)。
 
@@ -220,8 +224,7 @@ HTTP 端口处理遵循当前 U-Boot legacy 网络栈的 `httpdstp`，恢复命�
 
 ```sh
 device-server publish --root output/ota-feed \
-    --source output/am625/images/release --version 1 \
-    --product ti-am62x --layout am62x-sd-ab-v1
+    --source output/am625/images/release --version 1
 ```
 
 CLI 的 `--version` 是发布编号，必须高于已有编号。`drafts/` 保存网页上传结果；`releases/<编号>/` 保存固定发布快照；`latest` 是当前对设备可见的清单。不要覆盖已经发布的文件。
@@ -399,7 +402,7 @@ tail -f /var/log/fwctld.log
 ```sh
 /etc/init.d/S98fwctld stop
 fwctld --server http://192.168.10.246:8090 \
-  --cache /tmp/fwctld --product ti-am62x --layout am62x-sd-ab-v1 \
+  --cache /tmp/fwctld --state-dir /data/fwctld-state --hwid "$(fwctl hwid value)" \
   --device 1c-63-49-22-c4-f7 --auto-install --once --force --console /dev/console
 ```
 
@@ -412,7 +415,7 @@ Linux 无法启动时不能运行此命令；U-Boot 内核恢复和根文件系�
 
 ## 固件身份与阶段验证
 
-详见 [AM625 分阶段完整性验证](../../board/ti/am625/verified-boot.md)。
+详见 [AM625 分阶段完整性验证](../../bsp-base-external/board/ti/am625/verified-boot.md)。
 当前已经实现实际 payload 校验、强制恢复及对外展示的固件内容 ID / 版本 tag。
 `firmware_id` 是下面规范化清单的 SHA256（换行固定为 LF），不包含发布编号：
 
@@ -452,7 +455,7 @@ initramfs 恢复与普通 fwctld 升级事务不同：按内核绑定的 rootfs 
 同一设备的多次尝试仍完整保存在 `device_history`，统计采用最近事务结果。
 “成功”只由重启后的健康确认产生，下载完成、安装完成均不计成功。
 
-设备新上报格式为 `BSPOTASTATE2 ... PHASE TARGET RUNNING REASON`，原因是机器可读标识，
+设备新上报格式为 `BSPOTASTATE3 DEVICE HWID PUBLICATION VERSION BOOT PHASE TARGET RUNNING REASON`，原因是机器可读标识，
 例如 `boot-failed-rolled-back`、`download-sha256-mismatch`、`cache-storage-failed`、
 `fwctl-exit-5`。`fwctl update` 失败返回 errno（1–125），I/O、空间不足、设备不存在、
 内存不足等由守护进程归为设备异常。旧上报没有原因时显示 `not-reported`，不推测内核 panic
@@ -472,7 +475,7 @@ kernel/rootfs SHA256、回退源及新发布编号）。这些是本地持久审
 
 ## 网口就绪与后台等待
 
-`S40network` 先配置网络，`S98fwctld` 再启动守护进程；配置静态 IP 完成不代表 PHY 已建立链路。启动脚本默认传递 `--interface eth0`，fwctld 每秒检查该网卡是否 UP、RUNNING 且具有非空 IPv4 地址或非 link-local 的 IPv6 地址。条件满足前不查询 OTA 事务、发布版本或下载固件，只在进入等待状态时打印一次提示。网络恢复后立即恢复检查；此机制不阻塞 rcS 和本机健康检查。运行中掉线也在下一次轮询时进入等待。
+`S40network` 先配置网络，`S98fwctld` 再启动守护进程；配置静态 IP 完成不代表 PHY 已建立链路。启动脚本默认传递 `--interface eth0`，fwctld 每秒检查该网卡是否 UP、RUNNING 且具有非空 IPv4 地址或非 link-local 的 IPv6 地址。条件满足前不向服务器查询发布或下载固件；本地事务仍继续对账并保存健康/回退结果，只在进入等待状态时打印一次提示。网络恢复后立即恢复检查；此机制不阻塞 rcS 和本机健康检查。运行中掉线也在下一次轮询时进入等待。
 
 可在 `/data/fwctld.conf` 设置 `FWCTLD_INTERFACE="eth1"`；设为空可关闭本地网卡检查，适用于自定义路由或多网卡环境。直接执行 fwctld 时按需指定 `--interface`。`--once` 在网卡尚未就绪时立即返回非零，不无限等待。
 

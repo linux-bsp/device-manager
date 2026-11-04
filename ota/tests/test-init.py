@@ -53,6 +53,7 @@ class InitScript(unittest.TestCase):
         args=self.calls.read_text()
         for expected in ('/usr/sbin/fwctld','/var/run/fwctld.pid','/var/log/fwctld.log'):
             self.assertIn(expected,args)
+        self.assertIn('--state-dir\n/data/fwctld-state\n',args)
     def test_persistent_configuration_overrides_defaults(self):
         self.override('FWCTLD_SERVER=http://new.test\nFWCTLD_DEVICE_ID=new-board\n')
         r=self.run_script();self.assertEqual(r.returncode,0,r.stderr)

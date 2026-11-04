@@ -294,7 +294,7 @@ done:
 
 int main(int argc, char **argv)
 {
-    const char *server = NULL, *cache_arg = NULL, *hwid = NULL;
+    const char *server = NULL, *cache_arg = NULL, *hwid = NULL, *state_arg = NULL;
     unsigned long interval = 60;
     int once = 0, auto_install = 0, force = 0;
     const char *device = NULL, *console = NULL, *interface = NULL;
@@ -320,6 +320,8 @@ int main(int argc, char **argv)
             server = argv[++i];
         else if (!strcmp(argv[i], "--cache"))
             cache_arg = argv[++i];
+        else if (!strcmp(argv[i], "--state-dir"))
+            state_arg = argv[++i];
         else if (!strcmp(argv[i], "--hwid"))
             hwid = argv[++i];
         else if (!strcmp(argv[i], "--interval")) {
@@ -351,6 +353,11 @@ int main(int argc, char **argv)
         fwctld_log("Another fwctld instance is active or cache lock unavailable\n");
         return 1;
     }
+    char default_state[OTA_PATH];
+    if (!state_arg) {
+        if (ota_path(default_state, cache_base, "state")) { close(lock); return 1; }
+        state_arg = default_state;
+    }
     struct sigaction action = {.sa_handler = stop_daemon};
     sigemptyset(&action.sa_mask);
     sigaction(SIGTERM, &action, NULL);
@@ -358,18 +365,24 @@ int main(int argc, char **argv)
     fwctld_log("Started; polling every %lu seconds; automatic installation %s", interval, auto_install ? "enabled" : "disabled");
     int rc, waiting_for_network = 0;
     do {
-        if (interface && !fwctld_network_ready(interface)) {
-            if (!waiting_for_network)
-                fwctld_log("Waiting for network: %s needs link UP and an IP address; OTA checks deferred", interface);
-            waiting_for_network = 1;
-            rc = 1;
-            goto wait_for_next_check;
-        }
-        waiting_for_network = 0;
+        int online = !interface || fwctld_network_ready(interface);
         fwctld_network_context(interface, device);
         fwctld_hardware_context(hwid);
         const char *stage = "transaction reconciliation";
-        rc = auto_install ? fwctld_auto_reconcile(base, device, hwid) : 0;
+        rc = 0;
+        if (auto_install) {
+            rc = fwctld_auto_prepare(state_arg, device, hwid, online);
+            if (rc && online) fwctld_auto_report_state_problem(base, device, hwid);
+            if (!rc) rc = fwctld_auto_reconcile(base, device, hwid);
+        }
+        if (!online) {
+            if (!waiting_for_network)
+                fwctld_log("Waiting for network: %s needs link UP and an IP address; OTA checks deferred", interface);
+            waiting_for_network = 1;
+            if (!rc) rc = 1;
+            goto wait_for_next_check;
+        }
+        waiting_for_network = 0;
         if (!rc) {
             stage = "publication query/download";
             rc = poll_release(base, cache, hwid, auto_install, force, device);
@@ -391,10 +404,11 @@ wait_for_next_check:
         while (nanosleep(&delay, &delay) && errno == EINTR && !ota_stop)
             ;
     } while (!ota_stop);
+    fwctld_auto_close();
     close(lock);
     return ota_stop ? 0 : (rc ? 1 : 0);
 usage:
     fwctld_log("Usage: fwctld --server URL --cache DIR --hwid HEX16 "
-            "[--console PATH] [--interface IFACE] [--interval SECONDS] [--once] [--auto-install --device ID] [--force (requires --once --auto-install)]\n");
+            "[--state-dir DIR] [--console PATH] [--interface IFACE] [--interval SECONDS] [--once] [--auto-install --device ID] [--force (requires --once --auto-install)]\n");
     return 1;
 }

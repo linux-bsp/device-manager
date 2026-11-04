@@ -361,7 +361,7 @@ static void repair_alternate_rootfs(const struct settings *settings,
     char *restore[] = {"/usr/sbin/fwctl", "recovery", "restore-slot", number,
         "/tmp/recovery-alternate-rootfs.itb", bytes, id.payload, NULL};
     if (!run(restore, NULL, 0))
-        log_message("alternate rootfs restored and readback verified; deployment remains failed until health policy confirms it");
+        log_message("alternate rootfs restored and readback verified; boot selection and health state unchanged");
     else
         log_message("alternate rootfs repair failed; running system unchanged");
     unlink("/tmp/recovery-alternate-rootfs.itb");

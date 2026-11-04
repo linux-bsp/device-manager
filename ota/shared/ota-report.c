@@ -18,7 +18,7 @@ int ota_report_parse(const char *text, struct ota_report *r)
     char canonical[OTA_REPORT_SIZE];
     if (format_report(canonical, r) || strcmp(text, canonical)) return -1;
     const char *phases[] = {"installing", "rebooting", "boot-testing", "success",
-        "install-failed", "rolled-back", "interrupted", "reboot-failed", "up-to-date", "device-error", "verify-failed", "transport-error"};
+        "install-failed", "rolled-back", "interrupted", "reboot-failed", "up-to-date", "device-error", "verify-failed", "transport-error", "cancelled"};
     for (unsigned i = 0; i < sizeof(phases) / sizeof(phases[0]); i++)
         if (!strcmp(r->phase, phases[i]))
             return 0;
@@ -42,6 +42,7 @@ int ota_report_format(char text[OTA_REPORT_SIZE], const struct ota_report *r)
 const char *ota_report_category(const struct ota_report *r)
 {
     if (!strcmp(r->phase, "transport-error")) return "transport-error";
+    if (!strcmp(r->phase, "cancelled")) return "cancelled";
     if (!strcmp(r->phase, "rolled-back") || !strcmp(r->phase, "install-failed") || !strcmp(r->phase, "verify-failed")) return "upgrade-failure";
     if (!strcmp(r->phase, "device-error") || !strcmp(r->phase, "interrupted") || !strcmp(r->phase, "reboot-failed")) return "device-error";
     if (!strcmp(r->phase, "success")) return "success";

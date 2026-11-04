@@ -1,5 +1,10 @@
 #ifndef FWCTLD_AUTO_H
 #define FWCTLD_AUTO_H
+int fwctld_auto_prepare(const char *directory, const char *device,
+                       const char *hwid, int online);
+void fwctld_auto_close(void);
+void fwctld_auto_report_state_problem(const char *server, const char *device,
+                                     const char *hwid);
 /* Reconcile pending boot health before comparing or installing an image. */
 int fwctld_auto_reconcile(const char *server, const char *device, const char *hwid);
 int fwctld_report_problem(const char *server, const char *device, const char *hwid, unsigned long long publication, const char *phase, const char *reason);

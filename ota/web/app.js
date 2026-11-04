@@ -30,7 +30,7 @@ async function loadState(){
  if(location.pathname==='/firmware'){renderDetails(data);return;}
  // Resolve the active publication from the release list and include it in the
  // publishing table beside unpublished drafts.
- const phases={'requested':'请求升级','installing':'正在安装','rebooting':'等待重启','boot-testing':'启动健康检查中','success':'升级成功','install-failed':'安装失败','rolled-back':'已回滚','interrupted':'升级中断','reboot-failed':'重启失败','up-to-date':'无需升级','device-error':'设备异常','verify-failed':'固件校验失败','transport-error':'网络传输重试中'};
+ const phases={'requested':'请求升级','installing':'正在安装','rebooting':'等待重启','boot-testing':'启动健康检查中','success':'升级成功','install-failed':'安装失败','rolled-back':'已回滚','interrupted':'升级中断','reboot-failed':'重启失败','up-to-date':'无需升级','device-error':'设备异常','verify-failed':'固件校验失败','transport-error':'网络传输重试中','cancelled':'升级已取消'};
  const why=r=>r==='not-reported'?'原因未上报':r==='none'?'—':r||'未上报';
  const fmt=v=>v?`v${v>>>16}.${(v>>>8)&255}.${v&255}`:'未知';
  const when=v=>new Date(v*1000).toLocaleString();

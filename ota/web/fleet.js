@@ -7,7 +7,7 @@ const phaseNames = {
   'boot-testing': '健康检查中', success: '升级成功', 'install-failed': '安装失败',
   'rolled-back': '已回滚', interrupted: '升级中断', 'reboot-failed': '重启失败',
   'up-to-date': '版本一致', 'device-error': '设备异常', 'verify-failed': '校验失败',
-  'transport-error': '网络传输重试中'
+  'transport-error': '网络传输重试中', cancelled: '升级已取消'
 };
 function fleetTime(seconds) { return seconds ? new Date(seconds * 1000).toLocaleString() : '未上报'; }
 function fleetPhase(phase) { return phaseNames[phase] || phase || '未上报'; }

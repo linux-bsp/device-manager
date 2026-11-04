@@ -31,6 +31,7 @@ test: all
 	python3 ./tests/test-hwid-catalog.py
 	python3 ./tests/test-hwid-channels.py
 	python3 ./tests/test-auto.py
+	python3 ./tests/test-agent-state.py
 	python3 ./tests/test-init.py
 	python3 ./tests/test-network.py
 	python3 ./tests/test-device-context.py
