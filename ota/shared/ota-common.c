@@ -71,7 +71,7 @@ int ota_lock(const char *root)
 }
 
 /* Children are executed directly: no shell interpretation of paths or URLs. */
-int ota_run(char *const argv[], char *output, unsigned capacity)
+int ota_run_status(char *const argv[], char *output, unsigned capacity)
 {
     int pipes[2], status;
     if (pipe(pipes))
@@ -116,7 +116,12 @@ int ota_run(char *const argv[], char *output, unsigned capacity)
         if (ota_stop)
             kill(pid, SIGTERM);
     }
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0 && !ota_stop ? 0 : -1;
+    return WIFEXITED(status) && !ota_stop ? WEXITSTATUS(status) : -1;
+}
+
+int ota_run(char *const argv[], char *output, unsigned capacity)
+{
+    return ota_run_status(argv, output, capacity) == 0 ? 0 : -1;
 }
 
 int ota_hash(const char *path, char hash[65], unsigned long long *size)

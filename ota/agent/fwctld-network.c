@@ -86,12 +86,16 @@ void fwctld_hardware_context(const char *hwid)
 {
     snprintf(hardware, sizeof(hardware), "X-OTA-HWID: %s", hwid);
 }
-int fwctld_request(char *const args[], char *output, unsigned size)
+int fwctld_request_status(char *const args[], char *output, unsigned size)
 {
     char *request[96]; unsigned n = 0;
     while (args[n]) { if (n >= 80) return -1; request[n] = args[n]; n++; }
     for (int i = 0; i < context_count; i++) { request[n++] = "--header"; request[n++] = context[i]; }
     if (hardware[0]) { request[n++] = "--header"; request[n++] = hardware; }
     request[n] = NULL;
-    return ota_run(request, output, size);
+    return ota_run_status(request, output, size);
+}
+int fwctld_request(char *const args[], char *output, unsigned size)
+{
+    return fwctld_request_status(args, output, size) == 0 ? 0 : -1;
 }

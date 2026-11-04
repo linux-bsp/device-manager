@@ -54,29 +54,29 @@ static int download(const char *url, const char *path, unsigned long long limit,
             struct stat st;
             if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) {
                 close(fd);
-                return -1;
+                return -EIO;
             }
             offset = (unsigned long long)st.st_size;
             close(fd);
             if (offset > limit) {
-                if (unlink(path)) return -1;
+                if (unlink(path)) return -EIO;
                 offset = 0;
             } else if (offset == limit) {
                 char hash[65]; unsigned long long size;
                 if (!ota_hash(path, hash, &size) && size == limit &&
                     expected_hash && !strcmp(hash, expected_hash)) {
-                    if(sync_download_file(path))return -1;
+                    if(sync_download_file(path))return -EIO;
                     const char *file = strrchr(url, '/');
                     fwctld_log("Reusing SHA256-verified cached file %s", file ? file + 1 : url);
                     return 0;
                 }
-                if (unlink(path)) return -1;
+                if (unlink(path)) return -EIO;
                 offset = 0;
             }
         } else if (errno != ENOENT) {
-            return -1;
+            return -EIO;
         }
-        if(sync_download_file(path))return -1;
+        if(sync_download_file(path))return -EIO;
     }
     if (offset) {
         const char *file = strrchr(url, '/');
@@ -95,35 +95,47 @@ static int download(const char *url, const char *path, unsigned long long limit,
     args[n++] = "--output"; args[n++] = (char *)path;
     args[n++] = "--write-out"; args[n++] = "%{http_code}";
     args[n++] = "--url"; args[n++] = (char *)url; args[n] = NULL;
-    if (fwctld_request(args, status, sizeof(status))) {
-        if(sync_download_file(path))fwctld_error("Partial download retained without durability confirmation");
+    int request_status = fwctld_request_status(args, status, sizeof(status));
+    if (request_status) {
+        if(sync_download_file(path)) {
+            fwctld_error("Partial download retained without durability confirmation");
+            return -EIO;
+        }
         fwctld_error("Download interrupted at byte %llu; partial data retained for resume", offset);
-        return -1;
+        if (request_status == 23 || request_status == 26 || request_status == 27)
+            return -EIO;
+        if (request_status == 63) return -EBADMSG;
+        return -EAGAIN;
     }
     if (allow_absent && (!strcmp(status, "404") || !strcmp(status, "204"))) return 1;
     if ((!offset && strcmp(status, "200")) || (offset && strcmp(status, "206"))) {
         fwctld_error("HTTP %s while resuming %s at byte %llu", status, url, offset);
-        return -1;
+        return -EAGAIN;
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-    if (fd < 0) return -1;
+    if (fd < 0) return -EIO;
     int rc = 0;
     struct stat st;
-    if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
-                (unsigned long long)st.st_size > limit ||
-                (expected_hash && (unsigned long long)st.st_size != limit)) rc = -1;
-    if(close(fd))rc=-1;
-    if(sync_download_file(path))return -1;
+    if (fstat(fd, &st) || !S_ISREG(st.st_mode)) rc = -EIO;
+    else if (st.st_size < 0 || (unsigned long long)st.st_size > limit) rc = -EBADMSG;
+    else if (!st.st_size || (expected_hash && (unsigned long long)st.st_size != limit)) rc = -EAGAIN;
+    if(close(fd))rc=-EIO;
+    if(sync_download_file(path))return -EIO;
     if (rc) {
         fwctld_error("Downloaded size does not match manifest for %s; partial data retained", url);
-        return -1;
+        return rc;
     }
     char hash[65]; unsigned long long size;
-    if (expected_hash && (ota_hash(path, hash, &size) || size != limit ||
-        strcmp(hash, expected_hash))) {
-        (void)unlink(path);
+    if (expected_hash && ota_hash(path, hash, &size)) return -EIO;
+    if (expected_hash && (size != limit || strcmp(hash, expected_hash))) {
+        char parent[OTA_PATH];
+        if (snprintf(parent, sizeof(parent), "%s", path) >= (int)sizeof(parent)) return -EIO;
+        char *slash = strrchr(parent, '/');
+        if (!slash || unlink(path)) return -EIO;
+        if (slash == parent) slash[1] = '\0'; else *slash = '\0';
+        if (ota_sync_dir(parent)) return -EIO;
         fwctld_error("SHA256 mismatch for %s; discarded partial file", url);
-        return -1;
+        return -EBADMSG;
     }
     return 0;
 }
@@ -228,10 +240,17 @@ static int poll_release(const char *server, const char *cache, const char *hwid,
             char relative[96];
             snprintf(relative, sizeof(relative), "releases/%llu/%s", r.version, ota_files[i]);
             fwctld_log("Downloading %s (%llu bytes), firmware %s", ota_files[i], r.size[i], label);
-            if (ota_path(url, server, relative) || ota_path(path, stage, ota_files[i]) ||
-                download(url, path, r.size[i], r.hash[i], 1, 0, device)) {
+            if (ota_path(url, server, relative) || ota_path(path, stage, ota_files[i])) goto done;
+            int downloaded = download(url, path, r.size[i], r.hash[i], 1, 0, device);
+            if (downloaded) {
                 fwctld_error("Download failed: %s, firmware %s", ota_files[i], label);
-                if (auto_install) (void)fwctld_report_problem(server, device, hwid, r.version, "device-error", "download-failed");
+                if (auto_install && !ota_stop) {
+                    const char *phase = downloaded == -EIO ? "device-error" :
+                        downloaded == -EBADMSG ? "verify-failed" : "transport-error";
+                    const char *reason = downloaded == -EIO ? "cache-storage-failed" :
+                        downloaded == -EBADMSG ? "download-sha256-mismatch" : "download-interrupted";
+                    (void)fwctld_report_problem(server, device, hwid, r.version, phase, reason);
+                }
                 goto done;
             }
             fwctld_log("Download complete: %s", ota_files[i]);

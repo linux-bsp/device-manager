@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 import unittest
 
@@ -182,6 +183,62 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(history['category'], 'device-error')
         self.assertEqual(history['reason'], 'fwctl-exit-5')
         self.assertEqual(self.state()['latest'], 0)
+
+    def inject_download_failure(self, mode):
+        source = self.root/'kernel-fixture'
+        source.write_bytes(self.files['kernel.itb'])
+        real_curl = shutil.which('curl', path=admin.ENV['PATH'])
+        wrapper = self.bin/'curl'
+        wrapper.write_text(f'#!{sys.executable}\n' +
+            'import os,sys\nfrom pathlib import Path\n'
+            'args=sys.argv[1:]\n'
+            'url=args[args.index("--url")+1]\n'
+            'if url.endswith("/releases/1/kernel.itb"):\n'
+            ' output=Path(args[args.index("--output")+1])\n'
+            f' payload=Path({str(source)!r}).read_bytes()\n'
+            f' mode={mode!r}\n'
+            ' if mode=="storage":sys.exit(23)\n'
+            ' if mode=="partial":\n'
+            '  output.write_bytes(payload[:len(payload)//2]);print("000",end="");sys.exit(18)\n'
+            ' output.write_bytes(bytes([payload[0]^1])+payload[1:]);print("200",end="");sys.exit(0)\n'
+            f'os.execv({real_curl!r},["curl",*args])\n')
+        wrapper.chmod(0o755)
+        return wrapper
+
+    def test_interrupted_download_is_retryable_and_never_quarantines_firmware(self):
+        wrapper = self.inject_download_failure('partial')
+        self.agent(ok=False)
+        self.assertEqual(self.phase(), 'transport-error')
+        history = self.state()['device_history'][0]
+        self.assertEqual(history['category'], 'transport-error')
+        self.assertEqual(history['reason'], 'download-interrupted')
+        self.assertEqual(self.state()['latest'], 1)
+        self.assertEqual(self.state()['audit_events'], [])
+        self.assertFalse(self.calls.exists())
+        partial = self.root/'cache/1010001000110000/.download-1/kernel.itb'
+        self.assertEqual(partial.read_bytes(), self.files['kernel.itb'][:len(self.files['kernel.itb'])//2])
+        wrapper.unlink()
+        result = self.agent()
+        self.assertIn('Resuming kernel.itb at byte', result.stdout)
+        self.assertEqual(self.phase(), 'rebooting')
+        self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
+        self.assertEqual(self.state()['latest'], 1)
+
+    def test_download_storage_failure_remains_a_device_error(self):
+        self.inject_download_failure('storage')
+        self.agent(ok=False)
+        self.assertEqual(self.phase(), 'device-error')
+        self.assertEqual(self.state()['device_history'][0]['reason'], 'cache-storage-failed')
+        self.assertEqual(self.state()['latest'], 0)
+        self.assertFalse(self.calls.exists())
+
+    def test_download_hash_mismatch_is_an_image_failure(self):
+        self.inject_download_failure('corrupt')
+        self.agent(ok=False)
+        self.assertEqual(self.phase(), 'verify-failed')
+        self.assertEqual(self.state()['device_history'][0]['reason'], 'download-sha256-mismatch')
+        self.assertEqual(self.state()['latest'], 0)
+        self.assertFalse(self.calls.exists())
 
     def test_auto_failure_blocks_same_publication(self):
         self.fail_marker.touch()

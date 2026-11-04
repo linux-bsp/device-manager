@@ -4,5 +4,6 @@
 void fwctld_network_context(const char *interface, const char *device);
 void fwctld_hardware_context(const char *hwid);
 int fwctld_request(char *const args[], char *output, unsigned size);
+int fwctld_request_status(char *const args[], char *output, unsigned size);
 int fwctld_network_ready(const char *interface);
 #endif

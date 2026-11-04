@@ -1,6 +1,16 @@
 # BSP OTA：自动升级、结果上报与内核恢复
 
-服务端和设备端均为 C 可执行程序，代码位于 `bsp-base-external`。
+服务端和设备端均为 C 可执行程序，代码位于 Device Manager；板级配置由 `bsp-base-external` 提供。
+
+## 下载故障分类
+
+网络超时、连接中断、临时 HTTP 错误上报 `transport-error / download-interrupted`，
+保留已同步的部分文件，下次继续 HTTP Range 下载；此类事件保留在升级历史中，不计升级失败或
+设备异常，不隔离固件、不停止分发。界面显示“网络传输重试中”。
+缓存打开、写入、读取、同步失败上报 `device-error / cache-storage-failed`；内容长度越界或
+SHA256 不匹配上报 `verify-failed / download-sha256-mismatch`，后者删除损坏文件。
+真实设备异常和完整性错误继续遵守既有的停发、隔离和健康版本回退策略。
+主动停止 daemon 不会作为故障上报。升级前先部署支持上述事件的主机服务，再发布设备固件。
 
 - `device-server`：提供固件上传与发布管理网页，以及设备查询/下载接口。
 - `ota-cli`：C 命令行客户端，通过 HTTP 查看状态、上传固件包和发布草稿，适合 SSH/无图形界面环境。

@@ -22,6 +22,7 @@ int ota_hash(const char *path, char hash[65], unsigned long long *size);
 int ota_verify(const char *directory, const struct release *r);
 int ota_copy(const char *source, const char *dest);
 int ota_run(char *const argv[], char *output, unsigned capacity);
+int ota_run_status(char *const argv[], char *output, unsigned capacity);
 int ota_publish(int argc, char **argv);
 int ota_identifier(const char *value);
 int ota_hwid_valid(const char *value);
