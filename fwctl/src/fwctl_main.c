@@ -15,7 +15,9 @@ static void usage(const char *program)
 		"Usage: %s [--config path] <command>\n"
 		"Commands:\n"
         "  hwid [--config path] [show|value|set HEX16]\n"
-		"  init [a|b] (no argument: initramfs PID 1)\n"
+		"  help | capabilities\n"
+		"  init (initramfs PID 1 only)\n"
+		"  factory-init <a|b> --force (rebuild both metadata copies)\n"
 		"  recovery [status|fallback|restore|info-slot|check-slot|restore-slot|check-root|table|maintain] ...\n"
 		"  status\n"
 		"  version\n"
@@ -58,6 +60,10 @@ int main(int argc, char **argv)
 	int command_argc;
 	int ret;
 
+    if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
+        usage(argv[0]); return 0;
+    }
+
 	ret = parse_options(argc, argv, &options);
 	if (ret) {
 		usage(argv[0]);
@@ -65,13 +71,30 @@ int main(int argc, char **argv)
 	}
 	command = argv[options.command_index];
 	command_argc = argc - options.command_index - 1;
+    if (!strcmp(command, "help")) {
+        usage(argv[0]); return command_argc ? 2 : 0;
+    }
+    if (!strcmp(command, "capabilities")) {
+        if (command_argc) return 2;
+        puts("runtime=linux\nmetadata=FWMD1\nupdate_sources=local,http,https,tftp\n"
+             "recovery=rootfs\nboot_confirmation=health-check\nfactory_init=explicit-force\ninit=pid1");
+        return 0;
+    }
     if (!strcmp(command, "hwid")) {
         ret = fwctl_run_hwid(command_argc, argv + options.command_index + 1);
         if (ret) fprintf(stderr, "[fwctl] [ERROR] hwid failed: %s (%d)\n", strerror(-ret), -ret);
         return ret ? 1 : 0;
     }
-    if (!strcmp(command, "init") && !command_argc)
+    if (!strcmp(command, "init")) {
+        if (command_argc) { usage(argv[0]); return 2; }
         return fwctl_recovery_main(0, NULL);
+    }
+    if (!strcmp(command, "factory-init") && (command_argc != 2 ||
+        strlen(argv[options.command_index + 1]) != 1 ||
+        (strcmp(argv[options.command_index + 1], "a") && strcmp(argv[options.command_index + 1], "b")) ||
+        strcmp(argv[options.command_index + 2], "--force"))) {
+        usage(argv[0]); return 2;
+    }
     if (!strcmp(command, "recovery")) {
         if (!command_argc) { usage(argv[0]); return 2; }
         const char *action = argv[options.command_index + 1];

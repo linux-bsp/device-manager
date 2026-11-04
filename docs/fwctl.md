@@ -7,7 +7,10 @@ arguments, formats status and progress output, and maps failures to exit codes.
 ## Commands
 
 ```sh
-fwctl [--config path] init a|b
+fwctl help
+fwctl capabilities
+fwctl init                               # initramfs PID 1 only
+fwctl [--config path] factory-init a --force # choose a or b
 fwctl [--config path] status
 fwctl [--config path] version
 fwctl [--config path] update [all|bootloader|kernel|rootfs] [release.itb|URL]
@@ -16,6 +19,26 @@ fwctl [--config path] mark-bad <deployment>
 fwctl [--config path] rollback
 fwctl [--config path] health-check
 ```
+
+Linux and U-Boot use `fwctl` as their public command. `help` and `capabilities`
+work without opening firmware storage and identify each runtime's supported
+sources and recovery role. `factory-init a|b --force` has the same meaning in
+both: discard deployment metadata and create both copies for a provisioned slot,
+without writing payload partitions. It is a factory/recovery action, not part of
+normal OTA. Missing `--force` is rejected before opening storage. The former
+`init a|b` spelling is removed; `fwctl init` remains the Linux PID 1 entry only.
+
+| Task | U-Boot | Linux |
+| --- | --- | --- |
+| Inspect | `fwctl status` | `fwctl status`, `fwctl version` |
+| Full package | `fwctl update tftp release.itb all` | `fwctl update /path/release.itb` |
+| Kernel only | `fwctl update tftp kernel.itb` | `fwctl update kernel /path/release.itb` |
+| Confirm/reject | `fwctl mark-good`, `mark-bad` | same verbs; health worker normally owns confirmation |
+| Recovery | `fwctl recover-kernel` | `fwctl recovery ...` |
+
+The transport syntax reflects available services: U-Boot supports TFTP and
+memory FITs; Linux supports files and URLs. Recovery runs before the affected
+next stage: kernel recovery in U-Boot, rootfs recovery in initramfs.
 
 `health-check` runs the registered boot, marker, service, PDM/CAN device, and
 firmware metadata checks. It also queries `system_manager` over the OSA local

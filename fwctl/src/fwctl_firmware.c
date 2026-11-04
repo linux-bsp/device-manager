@@ -535,6 +535,9 @@ int fwctl_run_firmware(const struct fwctl_options *options,
 		return argc ? -EINVAL : print_running_version(options);
 
     char source[512];
+    if (!strcmp(command, "factory-init") && (argc != 2 ||
+        (strcmp(argv[0], "a") && strcmp(argv[0], "b")) || strcmp(argv[1], "--force"))) return -EINVAL;
+    if (!strcmp(command, "init")) return -EINVAL; /* Only the PID 1 dispatcher owns init. */
     if (!strcmp(command, "update")) {
         memset(&update_params, 0, sizeof(update_params));
         ret = fwctl_resolve_update(options, argc, argv, source, sizeof(source),
@@ -554,10 +557,9 @@ int fwctl_run_firmware(const struct fwctl_options *options,
         ret = recovery_command(handle, command, argc, argv);
     } else if (!strcmp(command, "ota-check")) {
         ret = check_ota_image(handle, argc, argv);
-    } else if (!strcmp(command, "init")) {
-		ret = argc == 1 && strlen(argv[0]) == 1 &&
-		      (argv[0][0] == 'a' || argv[0][0] == 'b') ?
-		      dm_fw_initialize(handle, argv[0][0] - 'a') : -EINVAL;
+    } else if (!strcmp(command, "factory-init")) {
+        printf("[fwctl] [WARN] Rebuilding metadata for slot %c; previous deployment history is discarded\n", argv[0][0]);
+        ret = dm_fw_initialize(handle, argv[0][0] - 'a');
 	} else if (!strcmp(command, "status")) {
 		ret = argc ? -EINVAL : dm_fw_get_status(handle, &status);
 		if (!ret)

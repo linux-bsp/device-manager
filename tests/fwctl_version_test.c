@@ -311,6 +311,13 @@ int main(void)
     assert(fwctl_run_firmware(&options, "update", 2, empty) == -EINVAL);
     assert(fwctl_run_firmware(&options, "update", 3, three) == -EINVAL);
     assert(opens == old_opens && mutations == old_mutations);
+    char *factory[] = {"b", "--force"};
+    char *no_force[] = {"b"};
+    assert(fwctl_run_firmware(&options, "factory-init", 1, no_force) == -EINVAL);
+    assert(fwctl_run_firmware(&options, "init", 1, no_force) == -EINVAL);
+    assert(opens == old_opens && mutations == old_mutations);
+    assert(fwctl_run_firmware(&options, "factory-init", 2, factory) == -ENOSYS);
+    assert(mutations == old_mutations + 1 && opens == closes);
     puts("fwctl: running identity and update argument/routing checks passed");
     return 0;
 }
