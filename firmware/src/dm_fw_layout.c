@@ -127,6 +127,8 @@ static int set_config_value(struct fw_layout *layout, const char *key,
         return *value ? 0 : -EINVAL;
     if (!strcmp(key, "product"))
         return copy_string(layout->product, sizeof(layout->product), value);
+    if (!strcmp(key, "hwid-config"))
+        return copy_string(layout->hwid_config, sizeof(layout->hwid_config), value);
     if (!strcmp(key, "layout-id"))
         return copy_string(layout->layout_id, sizeof(layout->layout_id), value);
     if (!strcmp(key, "signature-key")) {

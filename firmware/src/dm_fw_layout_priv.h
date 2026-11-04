@@ -43,6 +43,7 @@ struct fw_layout {
     char layout_id[FW_ID_SIZE];
     char signature_key[FW_PATH_SIZE];
     char work_dir[FW_PATH_SIZE];
+    char hwid_config[FW_PATH_SIZE];
 	uint8_t attempts;
 	int allow_bootloader_update;
 	int require_signature;

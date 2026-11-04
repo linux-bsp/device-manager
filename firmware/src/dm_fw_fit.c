@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 #define _GNU_SOURCE
 #include "dm_fw_fit_priv.h"
+#include "dm/hwid.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -352,6 +353,19 @@ static int verify_identity(const struct fw_layout *layout,
     if (strcmp(product, layout->product) ||
         strcmp(layout_id, layout->layout_id))
         return -EPERM;
+    if (layout->hwid_config[0]) {
+        struct dm_hwid_status device;
+        ret = dm_hwid_read(layout->hwid_config, &device);
+        if (ret) return ret;
+        int count = fdt_stringlist_count(fit->data, fit->configuration, "fw,hwids");
+        if (count < 1 || count > 256) return -EPERM;
+        for (int i = 0; i < count; i++) {
+            int length; unsigned char value[8];
+            const char *text = fdt_stringlist_get(fit->data, fit->configuration, "fw,hwids", i, &length);
+            if (!text || length != 16 || !dm_hwid_parse(text, value)) return -EINVAL;
+        }
+        if (fdt_stringlist_search(fit->data, fit->configuration, "fw,hwids", device.text) < 0) return -EPERM;
+    }
     return 0;
 }
 

@@ -7,12 +7,14 @@
 #include <string.h>
 
 int fwctl_recovery_main(int argc, char **argv);
+int fwctl_run_hwid(int argc, char **argv);
 
 static void usage(const char *program)
 {
 	fprintf(stderr,
 		"Usage: %s [--config path] <command>\n"
 		"Commands:\n"
+        "  hwid [--config path] [show|value|set HEX16]\n"
 		"  init [a|b] (no argument: initramfs PID 1)\n"
 		"  recovery [status|fallback|restore|info-slot|check-slot|restore-slot|check-root|table] ...\n"
 		"  status\n"
@@ -63,6 +65,11 @@ int main(int argc, char **argv)
 	}
 	command = argv[options.command_index];
 	command_argc = argc - options.command_index - 1;
+    if (!strcmp(command, "hwid")) {
+        ret = fwctl_run_hwid(command_argc, argv + options.command_index + 1);
+        if (ret) fprintf(stderr, "[fwctl] [ERROR] hwid failed: %s (%d)\n", strerror(-ret), -ret);
+        return ret ? 1 : 0;
+    }
     if (!strcmp(command, "init") && !command_argc)
         return fwctl_recovery_main(0, NULL);
     if (!strcmp(command, "recovery")) {

@@ -455,6 +455,14 @@ int fwctl_recovery_main(int argc, char **argv)
         sleep(1);
     }
     if (!ready) halt_recovery("root device or trusted A/B metadata unavailable; no writes attempted");
+    char hardware[128];
+    char *hardware_command[] = {"/usr/sbin/fwctl", "hwid", "value", NULL};
+    if (run(hardware_command, hardware, sizeof(hardware)))
+        halt_recovery("HWID storage missing, corrupt or inconsistent; no recovery writes attempted");
+    hardware[strcspn(hardware, "\r\n")] = 0;
+    char hardware_message[192];
+    snprintf(hardware_message, sizeof(hardware_message), "stage=initramfs hwid=%s", hardware);
+    log_message(hardware_message);
     char identity_text[256];
     char *identity_command[] = {"/usr/sbin/fwctl", "identity", "initramfs", NULL};
     if (!run(identity_command, identity_text, sizeof(identity_text))) {

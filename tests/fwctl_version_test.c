@@ -65,8 +65,8 @@ int32_t dm_fw_check_image(dm_fw_handle_t h, uint32_t d, uint32_t v,
 }
 int32_t dm_fw_get_identity(dm_fw_handle_t h, uint32_t d, char tag[32], char id[65])
 {
-    assert(h == 7 && d == booted);
-    if (!identity_available) return -ENODATA;
+    assert(h == 7 && d < DM_FW_DEPLOYMENT_COUNT);
+    if (!identity_available || d != booted) return -ENODATA;
     strcpy(tag, "v1.0.0"); strcpy(id, identity_id);
     return 0;
 }
