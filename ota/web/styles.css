@@ -63,8 +63,8 @@ button:hover { background: var(--accent-dark); }
 button:disabled { opacity: .52; cursor: default; }
 .secondary { background: white; color: #2d5365; border-color: #c9d7e1; }
 .secondary:hover { background: #eaf2f5; }
-.publishing, .publishing:disabled { background: #e5e7eb; color: #4b5563; border-color: #e5e7eb; opacity: 1; cursor: default; }
-.invalid, .invalid:disabled { background: #b42318; color: white; border-color: #b42318; opacity: 1; cursor: not-allowed; }
+.publishing, .publishing:disabled { background: #dcfce7; color: #166534; border-color: #bbf7d0; opacity: 1; cursor: default; }
+.invalid, .invalid:disabled { background: #e5e7eb; color: #6b7280; border-color: #d1d5db; opacity: 1; cursor: not-allowed; }
 button.small { padding: 6px 10px; font-size: 12px; }
 .notice { padding: 12px 15px; margin-bottom: 19px; border: 1px solid #b9e1d5; border-radius: 9px; background: #e7f7f0; color: #176449; white-space: pre-wrap; }
 .notice.error { background: #fff0ef; border-color: #f4c4bd; color: #a42b22; }
