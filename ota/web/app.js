@@ -142,8 +142,7 @@ function renderDetails(data){
  ['固件大小',size(item.bytes)],['发布状态',active.length?'当前 HWID 通道：'+active.join('、'):'未发布'],
  ['是否有效',item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],
  ['设备下载次数',String(sum('identified_downloads'))],['未识别设备的下载次数',String(sum('downloads')-sum('identified_downloads'))],
- ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)],
- ['历史发布编号',publications.map(x=>'#'+x.publication).join('、')||'尚未发布']];
+ ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)]];
  for(const [key,value] of rows){const row=document.createElement('tr');cell(row,key);const td=cell(row,value);td.style.whiteSpace='normal';td.style.overflowWrap='anywhere';table.append(row);}
  const hwidRow=document.createElement('tr');cell(hwidRow,'适用 HWID');const hardware=cell(hwidRow,'');hardware.style.whiteSpace='normal';hardware.style.overflowWrap='anywhere';
  for(const id of item.hwids||[]){const entry=document.createElement('div');entry.className='firmware-hwid';const code=document.createElement('code');code.textContent=id;const fields=document.createElement('div');fields.className='muted';fields.textContent=FirmwareHardware.describe(id);entry.append(code,fields);hardware.append(entry);}
