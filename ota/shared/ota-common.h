@@ -2,6 +2,7 @@
 #define OTA_COMMON_H
 #include <stdint.h>
 #include <signal.h>
+#include <stdio.h>
 #define OTA_PATH 4096
 #define OTA_MAX_FILE (512ULL * 1024 * 1024)
 struct release {
@@ -17,6 +18,7 @@ int ota_mkdir(const char *path);
 int ota_lock(const char *root);
 int ota_sync_dir(const char *path);
 int ota_read(const char *path, struct release *r);
+int ota_read_stream(FILE *file, struct release *r);
 int ota_write(const char *path, const struct release *r);
 int ota_hash(const char *path, char hash[65], unsigned long long *size);
 int ota_verify(const char *directory, const struct release *r);

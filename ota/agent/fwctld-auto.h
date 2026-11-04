@@ -3,6 +3,7 @@
 int fwctld_auto_prepare(const char *directory, const char *device,
                        const char *hwid, int online);
 void fwctld_auto_close(void);
+int fwctld_auto_cache_idle(void);
 void fwctld_auto_report_state_problem(const char *server, const char *device,
                                      const char *hwid);
 /* Reconcile pending boot health before comparing or installing an image. */

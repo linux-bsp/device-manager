@@ -67,11 +67,11 @@ class AutomaticOTA(unittest.TestCase):
             self.env['TEST_TARGET_VERSION'] = version
         return status, body
 
-    def agent(self, ok=True, force=False):
+    def agent(self, ok=True, force=False, extra=()):
         r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
             '--cache', str(self.root/'cache'), '--hwid', '1010001000110000',
             '--state-dir', str(self.root/'state'),
-            '--auto-install', '--device', 'board-01', '--once'] + (['--force'] if force else []), env=self.env, capture_output=True, text=True)
+            '--auto-install', '--device', 'board-01', '--once'] + (['--force'] if force else []) + list(extra), env=self.env, capture_output=True, text=True)
         if ok: self.assertEqual(r.returncode, 0, r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode, 0, r.stdout+r.stderr)
         return r
@@ -359,6 +359,30 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.calls.read_text(),'install\nreboot\n')
         wrapper.unlink();self.agent()
         self.assertEqual(self.phase(),'rolled-back');self.assertEqual(self.state()['latest'],0)
+
+    def test_persistent_cache_cleanup_waits_for_health_and_report_ack(self):
+        self.agent()
+        store=self.root/'persistent';cache=store/'1010001000110000';cache.mkdir(parents=True)
+        for number in range(20,26):
+            directory=cache/str(number);directory.mkdir()
+            manifest=f'BSPOTA2 {number} 1010001000110000\n'
+            for name in ('release.itb','kernel.itb','rootfs.itb'):
+                (directory/name).write_text('data')
+                manifest+=f'{name} 4 '+ 'a'*64+'\n'
+            (directory/'manifest').write_text(manifest)
+        shutil.copyfile(cache/'25/manifest',cache/'current')
+        partial=cache/'.download-26';partial.mkdir();(partial/'kernel.itb').write_text('partial')
+        extra=['--persistent-cache',str(store)]
+        self.write_snapshot('FWOTA1 1 0 1 65536 1 4 65537 0 3\n')
+        self.agent(extra=extra);self.assertTrue((cache/'20').exists())
+        wrapper=self.disconnect_server()
+        self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
+        self.agent(extra=extra);self.assertTrue((cache/'20').exists())
+        wrapper.unlink();result=self.agent(extra=extra)
+        self.assertIn('Reclaimed',result.stdout)
+        self.assertEqual(sorted(p.name for p in cache.iterdir()),['.download-26','.lock','24','25','current'])
+        self.assertEqual((partial/'kernel.itb').read_text(),'partial')
+        self.assertIn(' success ',(self.journal_directory()/'transaction').read_text())
 
     def test_corrupt_local_journal_blocks_writes_and_preserves_evidence(self):
         self.agent();path=self.journal_directory()/'transaction'

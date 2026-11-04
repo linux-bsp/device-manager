@@ -143,9 +143,8 @@ int ota_hash(const char *path, char hash[65], unsigned long long *size)
     return 0;
 }
 
-int ota_read(const char *path, struct release *r)
+int ota_read_stream(FILE *f, struct release *r)
 {
-    FILE *f = fopen(path, "r");
     char magic[16], tail;
     struct stat st;
     if (!f)
@@ -171,7 +170,15 @@ int ota_read(const char *path, struct release *r)
     if (fscanf(f, " %c", &tail) == EOF && !ferror(f))
         rc = 0;
 out:
-    fclose(f);
+    return rc;
+}
+
+int ota_read(const char *path, struct release *r)
+{
+    FILE *file = fopen(path, "r");
+    if (!file) return -1;
+    int rc = ota_read_stream(file, r);
+    if (fclose(file)) rc = -1;
     return rc;
 }
 

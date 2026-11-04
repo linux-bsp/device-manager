@@ -72,6 +72,17 @@ static int snapshot(struct fw_snapshot *s)
     return 0;
 }
 
+int fwctld_auto_cache_idle(void)
+{
+    struct fw_snapshot s;
+    struct fwctld_record event;
+    if (state_warning || journal.lock < 0 || snapshot(&s) || s.pending != 255 ||
+        s.active != s.booted || !s.good[s.booted] || s.state[s.booted] != 4) return 0;
+    if (have_transaction && strcmp(transaction.report.phase, "success") &&
+        strcmp(transaction.report.phase, "up-to-date")) return 0;
+    return fwctld_state_first(&journal, &event) == 1;
+}
+
 static int boot_id(char id[64])
 {
     FILE *f = fopen("/proc/sys/kernel/random/boot_id", "r");
