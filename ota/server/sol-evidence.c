@@ -1,6 +1,7 @@
 /* Incident copies are independent of the bounded live SOL window. */
 #define _GNU_SOURCE
 #include "sol-evidence.h"
+#include "sol-startup-evidence.h"
 #include "ota-device.h"
 #include <stdio.h>
 #include <limits.h>
@@ -138,6 +139,7 @@ int sol_evidence_event(sqlite3 *db,const struct ota_report *r,const char *observ
         sqlite3_bind_text(s,7,observer,-1,SQLITE_TRANSIENT);if(done(s))goto fail;
     }
 commit:
+    if(incident&&sol_startup_evidence_link(db,r))goto fail;
     if(sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK)return 0;
 fail:
     sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);return -1;
@@ -164,6 +166,13 @@ int sol_evidence_query(sqlite3 *db,const char *path,char **out)
     if(chunks)snprintf(canonical,sizeof(canonical),"/api/sol/incidents/%s/%llu/%s/%s/%llu",r.device,r.publication,r.boot,boot,cursor);
     else snprintf(canonical,sizeof(canonical),"/api/sol/incidents/%s/%llu/%s",r.device,r.publication,r.boot);
     if(strcmp(path,canonical))return 400;
+    if(!chunks&&sol_startup_evidence_reconcile(db,&r))return 503;
+    if(chunks){
+        int archived=sol_startup_evidence_chunks(db,&r,boot,cursor,out);
+        if(archived)return archived>0?200:503;
+    }
+    long long archive_bytes=0;
+    int archived=sol_startup_evidence_summary(db,&r,&archive_bytes);if(archived<0)return 503;
     sqlite3_stmt *s=query(db,"SELECT mode,reason,phase,observed_boot,bytes,truncated FROM evidence_groups WHERE device=?1 AND publication=?2 AND source=?3",&r);
     if(!s)return 503;
     if(sqlite3_step(s)!=SQLITE_ROW){sqlite3_finalize(s);return 404;}
@@ -171,7 +180,7 @@ int sol_evidence_query(sqlite3 *db,const char *path,char **out)
     if(chunks&&strcmp(mode,"logs")){sqlite3_finalize(s);return 404;}
     size_t length;FILE *f=open_memstream(out,&length);if(!f){sqlite3_finalize(s);return 500;}
     if(!chunks){
-        fprintf(f,"{\"mode\":\"%s\",\"reason\":\"%s\",\"phase\":\"%s\",\"observed_boot\":\"%s\",\"bytes\":%lld,\"truncated\":%s,\"complete\":false,\"boots\":[",mode,sqlite3_column_text(s,1),sqlite3_column_text(s,2),sqlite3_column_text(s,3),(long long)sqlite3_column_int64(s,4),sqlite3_column_int(s,5)?"true":"false");
+        fprintf(f,"{\"mode\":\"%s\",\"reason\":\"%s\",\"phase\":\"%s\",\"observed_boot\":\"%s\",\"bytes\":%lld,\"truncated\":%s,\"complete\":false,\"boots\":[",archived?"logs":mode,sqlite3_column_text(s,1),sqlite3_column_text(s,2),sqlite3_column_text(s,3),(long long)sqlite3_column_int64(s,4)+archive_bytes,sqlite3_column_int(s,5)?"true":"false");
         sqlite3_finalize(s);
         s=query(db,"SELECT b.boot,b.role,COALESCE(SUM(length(CAST(c.data AS BLOB))),0) FROM evidence_boots b LEFT JOIN evidence_chunks c USING(device,publication,source,boot) WHERE b.device=?1 AND b.publication=?2 AND b.source=?3 GROUP BY b.boot,b.role ORDER BY b.boot",&r);
     }else{
@@ -188,6 +197,9 @@ int sol_evidence_query(sqlite3 *db,const char *path,char **out)
             bytes(f,sqlite3_column_blob(s,4),sqlite3_column_bytes(s,4));fputc('}',f);
         }
     }
-    sqlite3_finalize(s);fputs(chunks?"]":"]}",f);int failed=fclose(f)||rc!=SQLITE_DONE;
+    sqlite3_finalize(s);fputc(']',f);
+    int attachment_error=!chunks&&sol_startup_evidence_metadata(db,&r,f)<0;
+    if(!chunks)fputc('}',f);
+    int failed=fclose(f)||rc!=SQLITE_DONE||attachment_error;
     if(failed){free(*out);*out=NULL;return 503;}return 200;
 }

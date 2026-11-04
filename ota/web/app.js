@@ -98,52 +98,21 @@ function incidentEvidence(entry,item){
  const reason=document.createElement('p');reason.textContent=diagnosticReasons[entry.reason]||entry.reason||'设备未上报具体原因';details.append(reason);
  const pane=document.createElement('div');details.append(pane);let loaded=false;
  const base='/api/sol/incidents/'+[entry.device,entry.publication,entry.source_boot].map(encodeURIComponent).join('/');
- async function loadBoot(boot){
-  const decoder=new SolConsole(32*1024*1024);let cursor=0;
-  for(let i=0;i<256;i++){
-   const response=await fetch(base+'/'+encodeURIComponent(boot) +'/'+cursor,{cache:'no-store'});
-   if(!response.ok)throw new Error('无法读取归档日志，请刷新后重试。');
-   const rows=await response.json();if(!rows.length)return {text:decoder.text('all'),truncated:decoder.truncated};
-   for(const row of rows){if(row.id<=cursor)throw new Error('归档日志游标异常');cursor=row.id;decoder.push(row);}
-  }
-  throw new Error('日志分页超过读取上限，请联系维护人员导出。');
- }
  details.ontoggle=async()=>{
   if(!details.open||loaded)return;loaded=true;pane.textContent='正在读取诊断记录…';
   try{
    const response=await fetch(base,{cache:'no-store'});
-   if(response.status===404){pane.textContent='此事件尚无关联日志。旧记录或未到达采集阶段的启动可能只有原因记录。';return;}
-   if(!response.ok)throw new Error('诊断记录暂时不可用，请重试。');
+   if(response.status===404){pane.textContent='此事件尚无关联日志。';return;}
+   if(!response.ok)throw Error('诊断记录暂时不可用，请重试。');
    const evidence=await response.json();pane.replaceChildren();
    if(evidence.reason&&evidence.reason!=='none'&&evidence.reason!=='not-reported')reason.textContent=diagnosticReasons[evidence.reason]||evidence.reason;
-   const info=document.createElement('p');pane.append(info);
-   if(evidence.mode==='candidate'){
-    info.textContent='升级结果已记录，失败日志关联仍待处理；稍后刷新重试。';return;
-   }
-   if(evidence.mode==='reason-only'){
-    info.textContent='仅上报原因：'+(diagnosticReasons[evidence.reason]||evidence.reason||'未知')+'。不附带日志；未确认的故障阶段不作推断。观察记录启动：'+(evidence.observed_boot||'未知');return;
-   }
-   info.textContent='保留服务器已接收的日志片段，未确认完整。'+(evidence.truncated?'已达到归档上限，存在缺失。':'尚未上传的片段可继续补入。');
-   for(const boot of evidence.boots){
-    const row=document.createElement('div');row.className='incident-boot';
-    const label=document.createElement('span');label.textContent=`${boot.role==='target'?'升级后启动':'升级执行阶段'} · ${boot.boot} · ${size(boot.bytes)}`;row.append(label);
-    if(!boot.bytes){const waiting=document.createElement('small');waiting.textContent='等待日志上传，或该启动未保存可用日志';row.append(waiting);pane.append(row);continue;}
-    const view=document.createElement('button');view.className='secondary';view.textContent='查看日志';
-    const download=document.createElement('button');download.className='secondary';download.textContent='下载日志';
-    const output=document.createElement('pre');output.className='incident-console';output.hidden=true;
-    const status=document.createElement('small');
-    async function read(save){
-     view.disabled=download.disabled=true;status.textContent='正在读取…';
-     try{
-      const log=await loadBoot(boot.boot);
-      status.textContent=log.truncated?'日志存在缺口或未完成的记录':'已加载服务器保存的片段，完整性未确认';
-      if(save){const url=URL.createObjectURL(new Blob([log.text],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`ota-failure-${entry.device}-${(item.firmware_id||'unknown').slice(0,8)}-${boot.boot}.log`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-      else {output.textContent=log.text;output.hidden=false;}
-     }catch(error){status.textContent=error.message;}finally{view.disabled=download.disabled=false;}
-    }
-    view.onclick=()=>read(false);download.onclick=()=>read(true);row.append(view,download,status,output);pane.append(row);
-   }
-  }catch(error){pane.textContent=error.message;loaded=false;}
+   const archives=evidence.startup_archives||[],info=document.createElement('p');pane.append(info);
+   if(evidence.mode==='candidate'){info.textContent='升级结果已记录，日志关联待处理；稍后刷新重试。';return;}
+   if(evidence.mode==='reason-only'&&!archives.length){info.textContent='已记录原因，尚无可确认关联的日志。观察记录启动：'+(evidence.observed_boot||'未知');return;}
+   info.textContent=archives.length?'启动日志已独立保存为事故附件；异常启动与恢复启动分别列出。':'保留服务器已接收的日志片段，完整性未确认。';
+   for(const archive of archives)pane.append(incidentLogRow(entry,item,archive,true));
+   for(const boot of evidence.boots)pane.append(incidentLogRow(entry,item,boot));
+  }catch(e){pane.textContent=e.message;loaded=false;}
  };
  return details;
 }
@@ -219,21 +188,33 @@ for(const [tab,list] of Object.entries(lists)){
 }
 
 
-const sol={active:false,token:'',rows:[],text:'',cursor:0,generation:0,busy:false,console:new SolConsole()};
+const sol={active:false,token:'',rows:[],text:'',cursor:0,generation:0,busy:false,deepLinkApplied:false,console:new SolConsole()};
 function solDecode(text){return new TextDecoder().decode(Uint8Array.from(text,c=>c.charCodeAt(0)));}
 async function solGet(path){const r=await fetch(path,{cache:'no-store',headers:sol.token?{Authorization:'Bearer '+sol.token}:{}});const body=await r.json();if(!r.ok)throw Error(body.error||'日志请求失败');return body;}
 function solRender(){const query=$('sol-filter').value.toLowerCase();$('sol-output').textContent=query?sol.text.split('\n').filter(line=>line.toLowerCase().includes(query)).join('\n'):sol.text;if($('sol-live').checked)$('sol-output').scrollTop=$('sol-output').scrollHeight;}
 function solReset(){sol.generation++;sol.cursor=0;sol.text='';sol.console=new SolConsole();solRender();}
 function solBoots(follow=false){const old=$('sol-boot').value;$('sol-boot').replaceChildren();for(const row of sol.rows.filter(r=>r.device===$('sol-device').value)){const o=document.createElement('option');o.value=row.boot;o.textContent=SolNames.label(row);o.title=SolNames.archived(row)?'服务器首次接收归档时间（北京时间），记录 ID：'+row.boot:'启动 ID：'+row.boot;$('sol-boot').append(o);}if(!follow&&[...$('sol-boot').options].some(o=>o.value===old))$('sol-boot').value=old;solReset();solRecordOptions();}
-async function solIndex(rows=null,follow=false){if(!rows)rows=await solGet('/api/sol/devices');sol.rows=rows;const old=$('sol-device').value;$('sol-device').replaceChildren();for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;solBoots(follow);if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';refreshFleetFromSol();}
+async function solIndex(rows=null,follow=false){
+ if(!rows)rows=await solGet('/api/sol/devices');rows=await solAddIncidentFallback(rows);sol.rows=rows;
+ const old=$('sol-device').value,requested=solRequestedRecord();$('sol-device').replaceChildren();
+ for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}
+ if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;
+ if(requested&&!sol.deepLinkApplied&&rows.some(r=>r.device===requested.device))$('sol-device').value=requested.device;
+ solBoots(follow);
+ if(requested&&!sol.deepLinkApplied){
+  $('sol-boot').value=requested.boot;solReset();solRecordOptions();sol.deepLinkApplied=true;
+  if(!$('sol-boot').value)$('sol-status').textContent='指定启动记录不存在或已删除，且没有可用事故附件。';
+ }
+ if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';refreshFleetFromSol();
+}
 async function solPoll(){
  if(sol.busy||!sol.active||location.hash!=='#sol'||!$('sol-live').checked)return;
  const device=$('sol-device').value,boot=$('sol-boot').value;if(!device||!boot)return;
  const generation=sol.generation;sol.busy=true;
- try{const rows=await solGet('/api/sol/logs/'+[device,boot,$('sol-stage').value,sol.cursor].map(encodeURIComponent).join('/'));if(generation!==sol.generation)return;
+ try{const selected=sol.rows.find(r=>r.device===device&&r.boot===boot);const endpoint=selected?.incident?'/api/sol/incidents/'+[device,selected.incident.publication,selected.incident.source,boot,sol.cursor].map(encodeURIComponent).join('/'):'/api/sol/logs/'+[device,boot,$('sol-stage').value,sol.cursor].map(encodeURIComponent).join('/');const rows=await solGet(endpoint);if(generation!==sol.generation)return;
  for(const row of rows){sol.cursor=row.id;sol.console.push(row);}
  sol.text=sol.console.text($('sol-stage').value);
- solRender();const info=sol.rows.find(r=>r.device===device&&r.boot===boot);if(info){$('sol-meta').textContent=(SolNames.archived(info)?'归档名='+SolNames.filename(info,'all')+'\n时间来源=服务器首次接收（北京时间），不代表异常发生时间\n':'')+'来源 IP='+info.peer+'\n'+solDecode(info.meta);$('sol-status').textContent=(SolNames.archived(info)?'已归档 · 服务器接收时间 '+(SolNames.stamp(info.archive_received_at??info.seen)?.label||'未知'):(Date.now()-info.seen*1000>60000?'设备暂未上报 · ':'已连接 · ')+'最后上报 '+new Date(info.seen*1000).toLocaleString())+(sol.console.truncated?' · 视图较早内容已截断':'');}
+ solRender();const info=sol.rows.find(r=>r.device===device&&r.boot===boot);if(info){$('sol-meta').textContent=(SolNames.archived(info)?'归档名='+SolNames.filename(info,'all')+'\n时间来源=服务器首次接收（北京时间），不代表异常发生时间\n':'')+(info.incident?'数据来源=独立事故附件（原 SOL 记录已删除）\n':'来源 IP='+info.peer+'\n')+solDecode(info.meta);$('sol-status').textContent=(info.incident?'独立事故归档 · '+boot:SolNames.archived(info)?'已归档 · 服务器接收时间 '+(SolNames.stamp(info.archive_received_at??info.seen)?.label||'未知'):(Date.now()-info.seen*1000>60000?'设备暂未上报 · ':'已连接 · ')+'最后上报 '+new Date(info.seen*1000).toLocaleString())+(sol.console.truncated?' · 视图较早内容已截断':'');}
  }catch(e){$('sol-status').textContent=e.message;}finally{sol.busy=false;}
 }
 $('sol-connect').onclick=async()=>{sol.token=$('sol-key').value.trim();if(!/^[a-f0-9]{64}$/.test(sol.token)){$('sol-status').textContent='请输入 64 位查看凭据';sol.token='';sol.active=false;return;}sol.active=true;try{await solIndex();await solPoll();}catch(e){$('sol-status').textContent=e.message;}};

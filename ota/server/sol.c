@@ -3,6 +3,7 @@
 #include "sol-evidence.h"
 #include "sol-startup.h"
 #include "sol-delete.h"
+#include "sol-startup-evidence.h"
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -76,7 +77,7 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db))return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db)||sol_startup_evidence_schema(db))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
 }
 int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)

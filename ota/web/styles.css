@@ -197,3 +197,7 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 .sol-boot-delete { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; font-size: 22px; line-height: 1; color: #a52b36; border: 0; background: transparent; border-radius: 5px; }
 .sol-boot-delete:hover:not(:disabled) { color: #a52b36; background: #fff0f1; }
 @media(max-width:540px){ .sol-boot-menu { position: fixed; left: 14px; right: 14px; top: 190px; width: auto; max-height: 60vh; } }
+.incident-startup { padding: 14px; margin: 12px 0; border: 1px solid #d5e3ed; border-radius: 8px; }
+.incident-startup strong { display: block; }
+.incident-startup p { overflow-wrap: anywhere; }
+.incident-sol-link { padding: 8px 2px; }

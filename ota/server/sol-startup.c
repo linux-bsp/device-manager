@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "sol-startup.h"
 #include "sol-delete.h"
+#include "sol-startup-evidence.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,7 +115,7 @@ int sol_startup_request(sqlite3 *db, const char *method, const char *path,
         s=prepare(db,"UPDATE startup_boots SET committed=1,manifest=?3,meta=?4 WHERE device=?1 AND boot=?2",device,boot,NULL);
         if(!s)goto rollback;
         sqlite3_bind_text(s,3,body,(int)length,SQLITE_TRANSIENT);sqlite3_bind_text(s,4,meta,-1,SQLITE_TRANSIENT);
-        if(done(s))goto rollback;
+        if(done(s)||sol_startup_evidence_commit(db,device,boot,body))goto rollback;
         if(sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)!=SQLITE_OK)goto rollback;
         return reply(out,200,"{\"next\":1}");
     }

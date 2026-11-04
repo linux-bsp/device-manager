@@ -102,3 +102,17 @@ SOL 的启动记录下拉列表每行右侧有“×”。确认后删除该条�
 服务端 `DELETE /api/sol/records/<device>/<boot>` 要求 `X-OTA-Request: 1`，校验同源请求；普通模式需要 viewer 凭据，`--sol-open-view` 仅允许读取，调试免凭据模式可直接操作。删除在 SQLite 事务中完成，保存删除时间、来源 IP 和原字节数；删除标记与有限续传游标防止设备重试、进程重启或 ACK 丢失后重新生成记录。
 
 设备本地文件不删除，独立保存的 OTA 审计和事故附件不受影响。SQLite 删除页可供后续日志复用，不在每次操作时执行阻塞的 VACUUM。本功能只修改管理端，不要求更新设备固件。测试使用 `python3 ota/tests/test-sol-delete.py`，不删除生产设备历史。
+
+## OTA 异常附件与 SOL 跳转
+
+OTA 异常详情现在分别列出“前次异常启动”和“回退后恢复启动”，提供查看日志、下载附件及“在 SOL 中打开”。下载文件包含 OTA 事务目标版本、短固件 ID、归档接收时间与短 capture ID；恢复启动实际使用的镜像身份以恢复日志为准。原始数据、完整事务标识和完整恢复启动 ID 保留在数据库中。
+
+服务端以设备、OTA publication/source boot、完整恢复启动 ID，以及两组缓存的相邻 generation/不同 slot 建立关系，不按八位固件哈希猜测。关联前重新核对四阶段长度与 CRC；缺少缓存对、身份关系不明确或归档字节损坏时不自动关联。同一恢复上下文被多个异常事务占用时，附件关系隐藏等待核实。capture ID 不等于 Linux boot ID，也不能仅凭未确认标记认定发生 panic。
+
+已确认关系的归档复制到独立事故表中，每个事务最多保存一对有限快照；早期快照按各阶段既有容量限制，独立于原有实时日志附件限额。SOL 列表删除、实时窗口轮转、进程重启均不删除这些副本。归档和异常事件不论先后到达都可关联；服务启动时回填已有记录，并在处理 SOL 删除前完成可确认的历史关联。
+
+`GET /api/sol/incidents/<device>/<publication>/<source>` 增加 `startup_archives`：capture、failed-startup/recovery-startup、恢复上下文、接收时间、字节数及四阶段 CRC/drop 状态。原有 `boots` 实时片段仍保留。附件通过原有 `/api/sol/incidents/.../<capture>/<cursor>` 读取，有限阶段返回 `raw=true`；完整性状态只描述已接入的阶段，不声称覆盖 ROM/ATF 或全部物理 UART 输出。
+
+SOL 链接使用 `/?sol_device=...&sol_boot=...&sol_publication=...&sol_source=...#sol`，打开后选中指定设备和记录，刷新保留。原始记录已经删除时，从独立事故附件回退读取并明确标注；事故副本的 × 禁用。指定记录不可用时显示缺失，不自动改看另一场启动。没有完整恢复关系的旧事故仍可保留原因及已有实时片段。
+
+测试：`python3 ota/tests/test-startup-incident.py` 覆盖关联、回填、删除与重启、错误/歧义上下文、截断状态及归档 CRC 失败。本功能只更新 host 管理端，不需要升级设备固件。

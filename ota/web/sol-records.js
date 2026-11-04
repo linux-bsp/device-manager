@@ -1,6 +1,7 @@
 'use strict';
 let solDeleting=false;
 function solRecordProtected(row){
+ if(row.incident)return true;
  const meta=solDecode(row.meta||'');
  const latest=Math.max(0,...sol.rows.filter(r=>r.device===row.device&&!SolNames.archived(r)).map(r=>r.order));
  return !SolNames.archived(row)&&(meta.split('\n').includes('current=yes')||(!meta&&row.order===latest));
@@ -18,7 +19,7 @@ function solRecordOptions(){
   choose.onclick=()=>{$('sol-boot').value=row.boot;$('sol-boot').dispatchEvent(new Event('change'));solRecordMenu(false);$('sol-boot-toggle').focus();};
   remove.className='sol-boot-delete';remove.textContent='×';remove.dataset.deleteBoot=row.boot;
   remove.setAttribute('aria-label','删除启动记录 '+SolNames.label(row));remove.disabled=solDeleting||solRecordProtected(row);
-  remove.title=solRecordProtected(row)?'正在采集的本次启动记录不能删除':'删除此条服务器 SOL 历史记录';
+  remove.title=row.incident?'独立事故附件保留用于 OTA 审计':solRecordProtected(row)?'正在采集的本次启动记录不能删除':'删除此条服务器 SOL 历史记录';
   remove.onclick=()=>solRemoveRecord(row);li.append(choose,remove);list.append(li);
  }
  if(!rows.length){const empty=document.createElement('li');empty.className='muted';empty.textContent='暂无启动记录';list.append(empty);}
