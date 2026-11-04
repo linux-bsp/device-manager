@@ -16,7 +16,7 @@ static void usage(const char *program)
 		"Commands:\n"
         "  hwid [--config path] [show|value|set HEX16]\n"
 		"  init [a|b] (no argument: initramfs PID 1)\n"
-		"  recovery [status|fallback|restore|info-slot|check-slot|restore-slot|check-root|table] ...\n"
+		"  recovery [status|fallback|restore|info-slot|check-slot|restore-slot|check-root|table|maintain] ...\n"
 		"  status\n"
 		"  version\n"
 		"  ota-status\n"
@@ -75,6 +75,10 @@ int main(int argc, char **argv)
     if (!strcmp(command, "recovery")) {
         if (!command_argc) { usage(argv[0]); return 2; }
         const char *action = argv[options.command_index + 1];
+        if (!strcmp(action, "maintain")) {
+            if (command_argc != 1) return 2;
+            return fwctl_recovery_main(1, argv + options.command_index + 1);
+        }
         char *args[3];
         if (!strcmp(action, "check-root") || !strcmp(action, "table")) {
             if (command_argc != 3) { usage(argv[0]); return 2; }
@@ -101,7 +105,8 @@ int main(int argc, char **argv)
 			usage(argv[0]);
 			return 2;
 		}
-		return fwctl_run_health_checks(&options) ? 1 : 0;
+		ret = fwctl_run_health_checks(&options);
+		return ret == -EAGAIN ? 75 : ret ? 1 : 0;
 	}
 	ret = fwctl_run_firmware(&options, command, command_argc,
 				 argv + options.command_index + 1);

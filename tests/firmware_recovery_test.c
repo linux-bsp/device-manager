@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <openssl/evp.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include "dm_fw_update_priv.h"
 #include "dm_fw_fit_priv.h"
@@ -90,5 +92,30 @@ int main(void)
     untouched=metadata;
     assert(fw_metadata_fallback(&metadata,1)==-ENOENT); /* Never bounce to known failed slot. */
     assert(!memcmp(&metadata,&untouched,sizeof(metadata)));
+    /* Standby repair must not write a shared running slot or a stale payload. */
+    fit_error=0; package.component=FW_COMPONENT_ROOTFS;
+    assert(!fw_metadata_save(&storage,&metadata));
+    assert(fw_restore_rootfs(&layout,&storage,0,"test.itb",sizeof(payload),hash,true)==-EPERM);
+    metadata.deployment[0].component[FW_COMPONENT_ROOTFS].slot=1;
+    metadata.deployment[0].identity.valid=1;
+    metadata.deployment[0].identity.size[1]=sizeof(payload);
+    memcpy(metadata.deployment[0].identity.hash[1],hash,32);
+    assert(!fw_metadata_save(&storage,&metadata));
+    assert(fw_restore_rootfs(&layout,&storage,0,"test.itb",sizeof(payload),wrong,true)==-ESTALE);
+    metadata.pending_deployment=0;
+    assert(!fw_metadata_save(&storage,&metadata));
+    assert(fw_restore_rootfs(&layout,&storage,0,"test.itb",sizeof(payload),hash,true)==-EBUSY);
+    metadata.pending_deployment=FW_SLOT_NONE;
+    assert(!fw_metadata_save(&storage,&metadata));
+    char file[]="/tmp/fw-recovery-claim-XXXXXX";
+    storage.fd=mkstemp(file); assert(storage.fd>=0); unlink(file);
+    memcpy(before,media,sizeof(media));
+    assert(!fw_restore_rootfs(&layout,&storage,0,"test.itb",sizeof(payload),hash,true));
+    offset=layout.region[FW_REGION_ROOTFS_B].offset;
+    memcpy(before+offset,payload,sizeof(payload));
+    assert(!memcmp(before,media,sizeof(media)));
+    assert(!fw_metadata_load(&storage,&metadata));
+    assert(metadata.deployment[0].state==FW_STATE_FAILED);
+    close(storage.fd);
     return 0;
 }

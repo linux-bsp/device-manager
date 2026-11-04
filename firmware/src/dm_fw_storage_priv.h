@@ -29,6 +29,8 @@ struct fw_storage_info {
 
 struct fw_storage {
 	int fd;
+    int read_fd;
+    bool read_direct;
 	const struct fw_layout *layout;
 	const struct fw_storage_ops *ops;
 	struct fw_storage_info info;
@@ -43,6 +45,10 @@ DM_FW_INTERNAL int fw_storage_pwrite_full(struct fw_storage *storage,
 DM_FW_INTERNAL int fw_storage_block_open(struct fw_storage *storage,
 					  const struct fw_layout *layout,
 					  bool writable);
+/* Hold an exclusive partition claim while repairing an unmounted block region. */
+DM_FW_INTERNAL int fw_storage_claim_region(struct fw_storage *storage,
+                                          const struct fw_region *region,
+                                          int *claim_fd);
 DM_FW_INTERNAL int fw_storage_mtd_open(struct fw_storage *storage,
 					const struct fw_layout *layout,
 					bool writable);

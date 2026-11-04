@@ -30,6 +30,15 @@ int fw_restore_rootfs(const struct fw_layout *layout, struct fw_storage *storage
     const struct fw_component_slot *slot = &metadata.deployment[deployment].component[FW_COMPONENT_ROOTFS];
     const struct fw_region *region = fw_layout_component_region(layout, FW_COMPONENT_ROOTFS, slot->slot);
     if (!slot->valid || !region || bytes > region->size) return -EINVAL;
+    if (allow_unselected) {
+        const struct fw_deployment *selected = &metadata.deployment[metadata.selected_deployment];
+        const struct fw_identity *identity = &metadata.deployment[deployment].identity;
+        if (metadata.pending_deployment != FW_SLOT_NONE ||
+            metadata.update_state == FW_STATE_WRITING) return -EBUSY;
+        if (selected->component[FW_COMPONENT_ROOTFS].slot == slot->slot) return -EPERM;
+        if (!identity->valid || identity->size[1] != bytes ||
+            memcmp(identity->hash[1], sha256, 32)) return -ESTALE;
+    }
     ret = fw_fit_open(&fit, path, layout);
     if (ret) return ret;
     ret = fw_fit_verify_package(layout, &fit, &package);
@@ -39,7 +48,11 @@ int fw_restore_rootfs(const struct fw_layout *layout, struct fw_storage *storage
     if (!ret && size != bytes) ret = -EBADMSG;
     if (!ret && (!EVP_Digest(data, size, digest, &length, EVP_sha256(), NULL) || length != 32)) ret = -EIO;
     if (!ret && memcmp(digest, sha256, 32)) ret = -EBADMSG;
+    int claim_fd = -1;
+    if (!ret && allow_unselected)
+        ret = fw_storage_claim_region(storage, region, &claim_fd);
     if (!ret) ret = fw_storage_write_region(storage, region, data, size);
+    if (claim_fd >= 0) close(claim_fd);
     fw_fit_close(&fit);
     /* Do not mark good: real rootfs services still own health confirmation. */
     return ret;

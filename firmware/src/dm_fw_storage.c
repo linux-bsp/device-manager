@@ -64,6 +64,7 @@ int fw_storage_open(struct fw_storage *storage,
 		return -EINVAL;
 	memset(storage, 0, sizeof(*storage));
 	storage->fd = -1;
+	storage->read_fd = -1;
 	storage->layout = layout;
 
 	switch (layout->storage_type) {
@@ -78,6 +79,11 @@ int fw_storage_open(struct fw_storage *storage,
 
 void fw_storage_close(struct fw_storage *storage)
 {
+	if (storage && storage->read_direct) {
+		close(storage->read_fd);
+		storage->read_fd = -1;
+		storage->read_direct = false;
+	}
 	if (storage && storage->fd >= 0) {
 		close(storage->fd);
 		storage->fd = -1;

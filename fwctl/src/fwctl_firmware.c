@@ -445,8 +445,10 @@ static int recovery_command(dm_fw_handle_t handle, const char *command, int argc
         if (!ret) printf("FWROOTFSCHECK1 %s\n", matches ? "match" : "different");
         return ret;
     }
-    /* In-place repair must never run from a mounted disk rootfs. */
-    if (statfs("/", &fs) || (fs.f_type != RAMFS_MAGIC && fs.f_type != TMPFS_MAGIC)) return -EPERM;
+    /* Selected-slot repair requires RAM root. Standby repair obtains an
+     * exclusive, unmounted partition claim and validates identity in the engine. */
+    if (strcmp(command, "recovery-restore-slot") &&
+        (statfs("/", &fs) || (fs.f_type != RAMFS_MAGIC && fs.f_type != TMPFS_MAGIC))) return -EPERM;
     if (!strcmp(command, "recovery-fallback"))
         return argc ? -EINVAL : dm_fw_recovery_fallback(handle, booted);
     if (!strcmp(command, "recovery-restore")) {

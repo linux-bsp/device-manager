@@ -22,7 +22,15 @@ static int health_report(const char *message, const char *value)
 	fprintf(stderr, "[fwctl] [ERROR] health-check: ");
 	fprintf(stderr, message, value);
 	fputc('\n', stderr);
-	return 1;
+	return -EIO;
+}
+
+static int health_pending(const char *message, const char *value)
+{
+	fprintf(stderr, "[fwctl] [WARN] health-check: ");
+	fprintf(stderr, message, value);
+	fputc('\n', stderr);
+	return -EAGAIN;
 }
 
 static int health_check_boot(const struct fwctl_options *options)
@@ -53,7 +61,8 @@ static int health_check_pid(const char *name, const char *path)
 
 	file = fopen(path, "r");
 	if (!file)
-		return health_report("%s pid file is missing", name);
+		return errno == ENOENT ? health_pending("%s pid file is not ready", name) :
+		       health_report("%s pid file is unreadable", name);
 	if (!fgets(buffer, sizeof(buffer), file)) {
 		fclose(file);
 		return health_report("%s pid file is invalid", name);
@@ -64,15 +73,16 @@ static int health_check_pid(const char *name, const char *path)
 	if (errno || end == buffer || pid <= 0 || pid > INT_MAX)
 		return health_report("%s pid file is invalid", name);
 	if (kill((pid_t)pid, 0) < 0 && errno != EPERM)
-		return health_report("%s is not running", name);
+		return health_pending("%s is not running yet", name);
 	return 0;
 }
 
 static int health_check_pids(const struct fwctl_options *options)
 {
 	(void)options;
-	if (health_check_pid("system_manager", "/run/system_manager.pid"))
-		return 1;
+	int ret = health_check_pid("system_manager", "/run/system_manager.pid");
+	if (ret)
+		return ret;
 	return health_check_pid("dropbear", "/var/run/dropbear.pid");
 }
 
@@ -96,7 +106,7 @@ static int health_check_manager(const struct fwctl_options *options)
 	(void)options;
 	fd = osa_ipc_connect(OSA_IPC_DEFAULT_SOCKET, 1000);
 	if (fd < 0)
-		return health_report("system_manager IPC is unavailable: %s",
+		return health_pending("system_manager IPC is not ready: %s",
 				     strerror(-fd));
 	ret = osa_ipc_send(fd, OSA_IPC_MESSAGE_HEALTH_QUERY,
 			   OSA_IPC_SERVICE_SYSTEM_MANAGER, 0U, 0U, 0U, 0,
@@ -105,7 +115,7 @@ static int health_check_manager(const struct fwctl_options *options)
 		ret = osa_ipc_receive(fd, &message, 1000);
 	close(fd);
 	if (ret < 0)
-		return health_report("system_manager health query failed: %s",
+		return health_pending("system_manager health query not ready: %s",
 				     strerror(-ret));
 	if (message.header.message_type != OSA_IPC_MESSAGE_HEALTH_SNAPSHOT ||
 	    message.header.payload_length % sizeof(status))
@@ -117,7 +127,7 @@ static int health_check_manager(const struct fwctl_options *options)
 		if ((status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED) &&
 		    (status.state == OSA_IPC_HEALTH_PENDING ||
 		     status.state == OSA_IPC_HEALTH_RESTARTING))
-			return health_report("required service is not ready: %s",
+			return health_pending("required service is not ready: %s",
 					     service_name(status.service_id));
 		if (status.state == OSA_IPC_HEALTH_EXPIRED ||
 		    status.state == OSA_IPC_HEALTH_FAILED)
@@ -150,9 +160,13 @@ static int health_check_sysfs(const struct fwctl_options *options)
 	size_t i;
 
 	(void)options;
-	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
-		if (stat(paths[i], &st) < 0 || !S_ISDIR(st.st_mode))
+	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		int ret = stat(paths[i], &st);
+		if (ret < 0 && errno == ENOENT)
+			return health_pending("%s is not ready", paths[i]);
+		else if (ret < 0 || !S_ISDIR(st.st_mode))
 			return health_report("%s is not available", paths[i]);
+	}
 	return 0;
 }
 
@@ -165,9 +179,13 @@ static int health_check_devices(const struct fwctl_options *options)
 	size_t i;
 
 	(void)options;
-	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
-		if (stat(paths[i], &st) < 0 || !S_ISCHR(st.st_mode))
+	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		int ret = stat(paths[i], &st);
+		if (ret < 0 && errno == ENOENT)
+			return health_pending("%s is not ready", paths[i]);
+		else if (ret < 0 || !S_ISCHR(st.st_mode))
 			return health_report("%s is not a character device", paths[i]);
+	}
 	return 0;
 }
 
@@ -207,9 +225,14 @@ static const struct health_check health_checks[] = {
 int fwctl_run_health_checks(const struct fwctl_options *options)
 {
 	size_t i;
+	int pending = 0;
 
-	for (i = 0; i < sizeof(health_checks) / sizeof(health_checks[0]); i++)
-		if (health_checks[i].run(options))
-			return -EIO;
-	return 0;
+	for (i = 0; i < sizeof(health_checks) / sizeof(health_checks[0]); i++) {
+		int ret = health_checks[i].run(options);
+		if (ret == -EAGAIN)
+			pending = 1;
+		else if (ret)
+			return ret;
+	}
+	return pending ? -EAGAIN : 0;
 }

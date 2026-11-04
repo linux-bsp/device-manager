@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
@@ -256,7 +257,8 @@ static int read_boot_status(const struct settings *s, unsigned *booted,
 static int settings_read(struct settings *s)
 {
     memset(s, 0, sizeof(*s));
-    FILE *file = fopen("/etc/fw-recovery.conf", "r"); char line[512];
+    FILE *file = fopen(getpid() == 1 ? "/etc/fw-recovery.conf" :
+                       "/etc/device-manager/recovery.conf", "r"); char line[512];
     if (!file) return -1;
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -309,12 +311,10 @@ static int alternate_rootfs_identity(unsigned deployment, struct alternate_rootf
     return 0;
 }
 
-/* Best-effort repair the other, unmounted rootfs using its own metadata identity.
- * This runs only after the selected rootfs is verified, so a network/server
- * failure cannot prevent a valid deployment from booting. */
+/* Background maintenance after boot health confirmation, never on PID 1's
+ * handoff path. The engine rechecks identity and mounted-slot safety under lock. */
 static void repair_alternate_rootfs(const struct settings *settings,
-                                    unsigned deployment, unsigned current_slot,
-                                    int *network)
+                                    unsigned deployment, unsigned current_slot)
 {
     struct alternate_rootfs id = { .deployment = deployment };
     if (alternate_rootfs_identity(deployment, &id)) {
@@ -329,7 +329,7 @@ static void repair_alternate_rootfs(const struct settings *settings,
     snprintf(number, sizeof(number), "%u", deployment);
     char *check[] = {"/usr/sbin/fwctl", "recovery", "check-slot", number, NULL};
     if (run(check, result, sizeof(result))) {
-        log_message("cannot verify alternate rootfs; continuing with selected verified rootfs");
+        log_message("cannot verify alternate rootfs; running system unchanged");
         return;
     }
     if (!strcmp(result, "FWROOTFSCHECK1 match\n")) {
@@ -341,16 +341,6 @@ static void repair_alternate_rootfs(const struct settings *settings,
         return;
     }
     log_message("alternate rootfs is damaged; attempting exact network recovery");
-    if (!*network) {
-        char interface[sizeof(settings->interface)];
-        strcpy(interface, settings->interface);
-        char *up[] = {"/sbin/ifup", interface, NULL};
-        if (run(up, NULL, 0)) {
-            log_message("network unavailable; booting selected verified rootfs and leaving alternate damaged");
-            return;
-        }
-        *network = 1;
-    }
     char url[768], bytes[32], limit[32];
     snprintf(url, sizeof(url), "%s/recovery/%s/rootfs/%u/%s/%s/rootfs.itb",
         settings->server, settings->hwid,
@@ -360,11 +350,11 @@ static void repair_alternate_rootfs(const struct settings *settings,
     unlink("/tmp/recovery-alternate-rootfs.itb");
     char *get[] = {"/usr/bin/curl", "--disable", "--fail", "--silent", "--show-error",
         "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "10",
-        "--max-time", "900", "--speed-limit", "1024", "--speed-time", "30",
+        "--max-time", "60", "--speed-limit", "1024", "--speed-time", "15",
         "--max-filesize", limit, "--output", "/tmp/recovery-alternate-rootfs.itb",
         "--url", url, NULL};
     if (run(get, NULL, 0)) {
-        log_message("alternate rootfs download failed; selected verified rootfs will still boot");
+        log_message("alternate rootfs download failed; standby repair deferred");
         unlink("/tmp/recovery-alternate-rootfs.itb");
         return;
     }
@@ -373,8 +363,31 @@ static void repair_alternate_rootfs(const struct settings *settings,
     if (!run(restore, NULL, 0))
         log_message("alternate rootfs restored and readback verified; deployment remains failed until health policy confirms it");
     else
-        log_message("alternate rootfs repair failed; selected verified rootfs will still boot");
+        log_message("alternate rootfs repair failed; running system unchanged");
     unlink("/tmp/recovery-alternate-rootfs.itb");
+}
+
+static int maintain_alternate_rootfs(void)
+{
+    struct settings settings;
+    unsigned booted, slot, version;
+    int lock = open("/run/fw-rootfs-maintenance.lock", O_CREAT|O_RDWR|O_CLOEXEC|O_NOFOLLOW, 0600);
+    if (lock < 0) return 1;
+    if (flock(lock, LOCK_EX|LOCK_NB)) { close(lock); return 1; }
+    int rc = 1;
+    if (access("/run/fwctl-boot-confirmed", R_OK) || settings_read(&settings) ||
+        read_boot_status(&settings, &booted, &slot, &version)) goto done;
+    char hardware[128];
+    char *args[] = {"/usr/sbin/fwctl", "hwid", "value", NULL};
+    if (run(args, hardware, sizeof(hardware))) goto done;
+    hardware[strcspn(hardware, "\r\n")] = 0;
+    if (strlen(hardware) != 16 || strspn(hardware, "0123456789abcdef") != 16) goto done;
+    memcpy(settings.hwid, hardware, 17);
+    repair_alternate_rootfs(&settings, 1U - booted, slot);
+    rc = 0;
+done:
+    close(lock);
+    return rc;
 }
 static void halt_recovery(const char *why)
 {
@@ -413,6 +426,8 @@ static int handoff(pthread_t thread, const char *rootfs_message)
 int fwctl_recovery_main(int argc, char **argv)
 {
     struct identity id;
+    if (argc == 1 && !strcmp(argv[0], "maintain"))
+        return getpid() == 1 ? 2 : maintain_alternate_rootfs();
     /* Safe host/target diagnostics: reads only, never creates a mapping. */
     if (argc == 3 && (!strcmp(argv[0], "check-root") || !strcmp(argv[0], "table"))) {
         if (identity_read(argv[2], &id)) return 2;
@@ -469,7 +484,7 @@ int fwctl_recovery_main(int argc, char **argv)
         log_bytes(identity_text, strlen(identity_text)); log_bytes("\n", 1);
     }
     else log_message("firmware identity unavailable or inconsistent; inspect boot metadata");
-    int fallback_attempted=0, network=0, alternate_checked=0;
+    int fallback_attempted=0, network=0;
     for (;;) {
         log_message("checking all rootfs data and hash-tree bytes against kernel-bound SHA256");
         if (!check_root(s.root[slot],&id)) {
@@ -479,10 +494,6 @@ int fwctl_recovery_main(int argc, char **argv)
                         umount("/newroot"); dm_remove();
                         try_fallback();
                         halt_recovery("verified image lacks /sbin/init; content is not a bootable rootfs");
-                    }
-                    if (!alternate_checked) {
-                        alternate_checked = 1;
-                        repair_alternate_rootfs(&s, 1U - booted, slot, &network);
                     }
                     char message[192];
                     snprintf(message, sizeof(message),

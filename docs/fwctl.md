@@ -21,6 +21,12 @@ fwctl [--config path] health-check
 firmware metadata checks. It also queries `system_manager` over the OSA local
 IPC socket for required service readiness and heartbeat state. It exits zero
 only when every check passes and is used by the AM62x boot confirmation flow.
+Exit 75 means required services or device nodes are not ready yet; exit 1 means
+a definite failure. The AM625 worker requires six consecutive passing checks,
+with at most 24 observations separated by five seconds. Readiness resets the
+consecutive-pass count; a definite failure ends observation immediately. A
+failed pending candidate is marked bad and rebooted to the confirmed deployment.
+An unhealthy already-confirmed system stays available for diagnostics.
 
 `version` reports the deployment actually booted, identified by
 `fw.deployment` in `/proc/cmdline`, followed by its release, kernel, and rootfs
@@ -154,8 +160,42 @@ fwctl health-check
 ```
 
 The AM625 confirmation worker still requires all health checks to pass during
-its stability window. A failed health check intentionally leaves the deployment
-pending; IPC recovery does not bypass service supervision or boot confirmation.
+its stability window. IPC recovery does not bypass supervision or confirmation.
+Failure to write the rejection metadata leaves an explicit diagnostic and never
+silently confirms the candidate.
+
+## Standby rootfs maintenance
+
+The initramfs verifies the selected rootfs and hands off without checking or
+downloading the standby rootfs. After this boot passes health confirmation, the
+existing background health worker runs `fwctl recovery maintain`. It checks the
+alternate rootfs against its recorded full identity and requests the exact
+version, firmware ID and payload SHA256 if repair is needed. A manual retry is:
+
+```sh
+fwctl recovery maintain
+```
+
+Maintenance uses `/etc/device-manager/recovery.conf`, installed from the same
+board configuration embedded in the initramfs. It does not reconfigure the
+running network, open the watchdog, or delay startup. Downloads have a 60-second
+limit; an unavailable server defers repair.
+
+Standby repair rejects pending/writing transactions, a shared running rootfs
+slot, stale identity and mismatched payload. On SD/eMMC, it holds an exclusive
+kernel claim on the exact partition during write and readback; mounted
+partitions and device-mapper holders are rejected. NOR background repair is not
+enabled by this change. Repairing the selected rootfs still requires RAM root.
+Repair does not confirm a deployment or change boot selection.
+
+Block-device metadata, integrity checks and write readback use a separate
+`O_DIRECT` descriptor. Reads are internally aligned to the logical sector size,
+including short headers and unaligned FIT tails. This avoids whole-device versus
+partition page-cache aliases and prevents readback from checking only the
+writer's cached bytes. Writes are synchronized before readback. Regular-file
+simulation uses ordinary reads; direct-I/O errors on real block devices are
+reported rather than silently falling back to cached reads. Physical power-loss
+behavior still requires validation with the actual SD/eMMC hardware.
 
 Only a privileged service should have access to `fwctl` and the raw storage
 device.
