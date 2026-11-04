@@ -8,6 +8,7 @@ test('board HWID fields preserve their widths and exact PCB silk screen version'
         pcb:'10',reserved:'000',pcbVersion:'v1.0',grouped:'1-01-0001-0001-10-000'
     });
     assert.match(hwid.describe('1010001000110000'), /项目 0001 · 产品型号 0001 · PCB v1\.0/);
+    assert.equal(hwid.product('1010001000110000'), '产品线 01 · 项目 0001 · 型号 0001 · PCB v1.0');
 });
 test('high-bit identities keep all 64 bits without numeric conversion', () => {
     const value='1ffffffffffff000';
@@ -18,4 +19,5 @@ test('high-bit identities keep all 64 bits without numeric conversion', () => {
 test('missing or invalid identities are never displayed as generic hardware support', () => {
     for(const value of [null,undefined,123,'101000100011000','2010001000110000','1010001000110001','1000001000110000','1010000000110000','1010001000010000','101000100011A000','<script>'])
         assert.equal(hwid.parse(value),null,String(value));
+    assert.equal(hwid.product(null), '未知硬件');
 });

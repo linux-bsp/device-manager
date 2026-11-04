@@ -47,8 +47,8 @@ without this field are shown as `unknown`.
 `update kernel` (or `rootfs`/`bootloader`) uses the configured update server and
 only stages that component from the release manifest. `update` with no
 component stages all components. A local file or complete URL may still be
-provided as the final argument for one-off updates. The command downloads or opens the release FIT, validates its product and layout
-identity, verifies the manifest and component hashes, checks version and
+provided as the final argument for one-off updates. The command downloads or opens the release FIT, matches the complete device HWID against its `fw,hwids`
+allowlist, verifies the manifest and component hashes, checks version and
 rollback policy, and writes each component to the inactive physical slot.
 The target deployment is persisted as non-bootable `writing` before any
 component write. It becomes `ready` and `pending` only after every write and
@@ -76,8 +76,7 @@ The default configuration path is `/etc/device-manager/firmware.conf`:
 ```ini
 device=/dev/mmcblk1
 storage-type=block
-product=ti-am62x
-layout-id=am62x-sd-ab-v1
+hwid-config=/etc/fw_env.config
 boot-attempts=3
 work-dir=/tmp
 update-protocol=tftp

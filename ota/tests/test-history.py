@@ -14,7 +14,7 @@ class History(unittest.TestCase):
     def setUp(self): admin.AdminHTTP.setUp(self)
     def report(self, phase, publication=1, boot='boot-one', device='board-one', version=65538):
         running=version if phase=='success' else 65537
-        body=f'BSPOTASTATE1 {device} ti-am62x am62x-sd-ab-v1 {publication} {version} {boot} {phase} 1 {running}\n'
+        body=f'BSPOTASTATE3 {device} 1010001000110000 {publication} {version} {boot} {phase} 1 {running} not-reported\n'
         return body, self.request('POST','/api/devices/'+device,body,{'X-OTA-Request':'1'})
     def restart(self):
         self.server.terminate();self.server.wait(timeout=10)
@@ -45,7 +45,7 @@ class History(unittest.TestCase):
         self.assertTrue(all(h['phase']=='rolled-back' for h in histories))
     def test_migration_only_preserves_existing_snapshot(self):
         d=self.feed/'devices';d.mkdir()
-        body='BSPOTASTATE1 legacy ti-am62x am62x-sd-ab-v1 3 65538 original-boot rebooting 1 65537\n'
+        body='BSPOTASTATE3 legacy 1010001000110000 3 65538 original-boot rebooting 1 65537 not-reported\n'
         (d/'legacy').write_text(body);os.utime(d/'legacy',(1234567890,1234567890))
         self.restart();h=self.state()['device_history'][0]
         self.assertTrue(h['imported']);self.assertEqual(h['started'],1234567890)

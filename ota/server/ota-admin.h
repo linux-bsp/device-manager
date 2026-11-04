@@ -8,9 +8,18 @@
 #define OTA_HWIDS_SIZE (OTA_HWID_LIMIT * 17)
 int ota_hwid_list_valid(const char *values);
 int ota_fit_hwids(const char *directory, char values[OTA_HWIDS_SIZE]);
+int ota_fit_file_hwids(const char *directory, const char *filename, char values[OTA_HWIDS_SIZE]);
+int ota_hwid_supported(const char *values, const char *hwid);
+int ota_channel_path(const char *root, const char *hwid, char path[OTA_PATH]);
+int ota_channel_read(const char *root, const char *hwid, struct release *release);
+int ota_channel_set(const char *root, const struct release *release);
+int ota_channel_active(const char *root, const struct release *release);
+unsigned long long ota_publication_next(const char *root);
+unsigned long long ota_channel_max(const char *root);
+int ota_channels_json(const char *root, FILE *out);
 struct ota_report;
 struct ota_network_context {
-    const char *ip, *mac, *hostname, *boot;
+    const char *ip, *mac, *hostname, *boot, *hwid;
     char peer_ip[46];
 };
 int ota_network_valid(const struct ota_network_context *network);
@@ -42,5 +51,5 @@ void ota_draft_cleanup(const char *temp);
 int ota_draft_finish(const char *root, const char *temp, char id[32]);
 int ota_admin_state(const char *root, char **json);
 int ota_admin_bundle(const char *root, const char *kind, const char *id, char filename[128], unsigned long long *size);
-int ota_admin_publish(const char *root, const char *id, unsigned long long *number);
+int ota_admin_publish(const char *root, const char *id, const char *hwid, unsigned long long *number);
 #endif

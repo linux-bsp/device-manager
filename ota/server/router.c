@@ -119,7 +119,7 @@ static void upload(int client, unsigned long long length, const struct server_co
     if (ota_draft_finish(context->directory, temp, id)) {
         ota_draft_cleanup(temp);
         http_json(client, 422, "Unprocessable Content",
-            "{\"error\":\"固件包校验失败。请上传包含 release.itb、kernel.itb、rootfs.itb 的 tar.gz；检查 FIT 版本、产品、HWID 声明及组件 SHA256 是否匹配。\"}", false);
+            "{\"error\":\"固件包校验失败。请上传包含 release.itb、kernel.itb、rootfs.itb 的 tar.gz；检查 FIT 版本、HWID 声明及组件 SHA256 是否匹配。\"}", false);
         return;
     }
     char json[128];
@@ -150,11 +150,11 @@ void server_route_client(int client, const struct server_context *context)
     const char *download_device = request.device;
     const char *requested_range = request.range;
     struct ota_network_context network = {
-        .ip = request.ip, .mac = request.mac, .hostname = request.hostname, .boot = request.boot
+        .ip = request.ip, .mac = request.mac, .hostname = request.hostname, .boot = request.boot, .hwid = request.hwid
     };
     memcpy(network.peer_ip, request.peer_ip, sizeof(network.peer_ip));
     int root = context->root;
-    if ((download_device && !ota_identifier(download_device)) ||
+    if ((request.hwid && !ota_hwid_valid(request.hwid)) || (download_device && !ota_identifier(download_device)) ||
         ((network.ip || network.mac || network.hostname || network.boot) &&
          (!download_device || !ota_network_valid(&network)))) {
         http_json(client, 400, "Bad Request", "{\"error\":\"Invalid request headers\"}", head);
@@ -173,6 +173,12 @@ void server_route_client(int client, const struct server_context *context)
         }
         snprintf(canonical, sizeof(canonical), "/api/policy/%s/%llu", device, publication);
         if (strcmp(path, canonical)) { http_text(client, 400, "Bad Request", "Invalid policy query\n", head); return; }
+        struct ota_report target = {.publication = publication};
+        if (!request.hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
+        strcpy(target.hwid, request.hwid);
+        if (!ota_report_targets(context->directory, &target)) {
+            http_text(client, 403, "Forbidden", "Publication targets another HWID\n", head); return;
+        }
         char relative[64], directory[OTA_PATH];
         snprintf(relative, sizeof(relative), "releases/%llu", publication);
         int blocked = ota_path(directory, context->directory, relative) ? -1 : ota_quarantine_blocked(context->directory, directory);
@@ -188,6 +194,8 @@ void server_route_client(int client, const struct server_context *context)
             http_text(client, 400, "Bad Request", "Invalid device ID\n", head);
         } else if (!strcmp(method, "GET") || head) {
             int rc = ota_device_read(context->directory, id, body);
+            if (!request.hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
+            if (!rc) { struct ota_report previous; if (!ota_report_parse(body, &previous) && strcmp(previous.hwid, request.hwid)) rc = 1; }
             if(!rc){
                 struct ota_report report;
                 if(!ota_report_parse(body,&report)&&ota_report_incident(&report)&&sol_ota_event(context->directory,&report,NULL))
@@ -210,8 +218,10 @@ void server_route_client(int client, const struct server_context *context)
             body[received] = 0;
             struct ota_report report;
             if (memchr(body, 0, received) || ota_report_parse(body, &report) || strcmp(report.device, id) ||
-                (download_device && strcmp(download_device, id)))
+                (download_device && strcmp(download_device, id)) || !request.hwid || strcmp(report.hwid, request.hwid))
                 http_text(client, 400, "Bad Request", "Invalid report\n", false);
+            else if (!ota_report_targets(context->directory, &report))
+                http_text(client, 403, "Forbidden", "Publication targets another HWID\n", false);
             else if (ota_catalog_request(context->directory, id, report.publication, report.boot, report.phase, &network) ||
                      ota_device_write(context->directory, &report))
                 http_text(client, 500, "Write Failed", "Report not saved\n", false);
@@ -253,14 +263,16 @@ void server_route_client(int client, const struct server_context *context)
                 return;
             }
             unsigned long long number = 0;
-            int status = ota_admin_publish(context->directory, path + 13, &number);
+            char draft[64], hwid[17], extra;
+            int status = sscanf(path + 13, "%63[^/]/%16s%c", draft, hwid, &extra) == 2 ?
+                ota_admin_publish(context->directory, draft, hwid, &number) : 400;
             if (status == 200) {
                 char json[96];
                 snprintf(json, sizeof(json), "{\"publication\":%llu,\"status\":\"published\"}\n", number);
                 http_json(client, 200, "OK", json, false);
             } else {
                 http_json(client, status, "Publication Failed",
-                    "{\"error\":\"发布失败：检查草稿、产品/布局、版本是否倒退、磁盘空间或是否有其他发布任务。\"}", false);
+                    "{\"error\":\"发布失败：检查草稿、HWID、版本是否倒退、磁盘空间或是否有其他发布任务。\"}", false);
             }
         }
         return;
@@ -314,7 +326,9 @@ void server_route_client(int client, const struct server_context *context)
         http_text(client, 200, "OK", "ok\n", head);
         return;
     }
+    char recovery_hwid[17] = "";
     if (!strncmp(path, "/recovery/", 10)) {
+        if (sscanf(path, "/recovery/%16[^/]/", recovery_hwid) != 1 || !ota_hwid_valid(recovery_hwid)) { http_text(client, 400, "Bad Request", "Invalid HWID\n", head); return; }
         char directory[OTA_PATH];
         const char *filename = strlen(path) >= 11 && !strcmp(path + strlen(path) - 11, "/rootfs.itb") ? "rootfs.itb" : "kernel.itb";
         int recovery_rc = !strcmp(filename, "rootfs.itb") ?
@@ -329,16 +343,28 @@ void server_route_client(int client, const struct server_context *context)
     }
     int artifact_root = -1;
     const char *name = NULL;
-    if (!strcmp(path, "/latest")) {
-        if (!head && network.ip) {
-            char latest_path[OTA_PATH]; struct release latest = {0};
-            if (!ota_path(latest_path, context->directory, "latest")) (void)ota_read(latest_path, &latest);
-            if (ota_catalog_request(context->directory, download_device, latest.version, network.boot, "requested", &network)) {
-                http_text(client, 503, "Unavailable", "Cannot persist device request audit\n", head); return;
-            }
+    if (!strncmp(path, "/latest/", 8)) {
+        const char *hwid = path + 8;
+        if (!ota_hwid_valid(hwid) || !request.hwid || strcmp(hwid, request.hwid)) {
+            http_text(client, 403, "Forbidden", "Exact device HWID required\n", head); return;
         }
-        name = "latest";
-        artifact_root = dup(root);
+        struct release latest;
+        if (ota_channel_read(context->directory, hwid, &latest)) {
+            if (network.ip && ota_catalog_request(context->directory, download_device, 0, network.boot, "requested", &network)) {
+                http_text(client, 503, "Unavailable", "Cannot persist request audit\n", head); return;
+            }
+            char channel_path[OTA_PATH];
+            int missing = !ota_channel_path(context->directory, hwid, channel_path) && access(channel_path, F_OK) && errno == ENOENT;
+            http_text(client, missing ? 204 : 503, missing ? "No Content" : "Unavailable", "", head); return;
+        }
+        if (!head && network.ip && ota_catalog_request(context->directory, download_device, latest.version, network.boot, "requested", &network)) {
+            http_text(client, 503, "Unavailable", "Cannot persist device request audit\n", head); return;
+        }
+        snprintf(path, sizeof(request.path), "/releases/%llu/manifest", latest.version);
+        name = "manifest";
+        int releases = openat(root, "releases", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        char number[32]; snprintf(number, sizeof(number), "%llu", latest.version);
+        if (releases >= 0) { artifact_root = openat(releases, number, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC); close(releases); }
     } else {
         unsigned long long version;
         char filename[32], trailing, canonical[128], number[32];
@@ -366,6 +392,17 @@ void server_route_client(int client, const struct server_context *context)
                     close(releases);
                 }
             }
+        }
+    }
+    if (name && artifact_root >= 0) {
+        char relative[64], directory[OTA_PATH], manifest[OTA_PATH]; struct release release;
+        unsigned long long publication;
+        const char *hwid = recovery_hwid[0] ? recovery_hwid : request.hwid;
+        if (sscanf(path, "/releases/%llu/", &publication) != 1) { close(artifact_root); return; }
+        snprintf(relative, sizeof(relative), "releases/%llu", publication);
+        if (!ota_hwid_valid(hwid) || ota_path(directory, context->directory, relative) || ota_path(manifest, directory, "manifest") ||
+            ota_read(manifest, &release) || strcmp(release.hwid, hwid)) {
+            http_text(client, 403, "Forbidden", "Firmware does not target this HWID\n", head); close(artifact_root); return;
         }
     }
     if (name && !strcmp(name, "version") && artifact_root >= 0) {
@@ -414,13 +451,9 @@ void server_route_client(int client, const struct server_context *context)
         close(artifact_root);
         return;
     }
-    if (name && artifact_root >= 0 && (!strcmp(name, "latest") || strstr(name, ".itb"))) {
+    if (name && artifact_root >= 0 && (!strcmp(name, "manifest") || strstr(name, ".itb"))) {
         char directory[OTA_PATH], relative[64]; unsigned long long publication;
-        if (!strcmp(name, "latest")) {
-            char manifest[OTA_PATH]; struct release active;
-            if (ota_path(manifest, context->directory, "latest") || ota_read(manifest, &active)) publication = 0;
-            else publication = active.version;
-        } else if (sscanf(path, "/releases/%llu/", &publication) != 1) publication = 0;
+        if (sscanf(path, "/releases/%llu/", &publication) != 1) publication = 0;
         if (publication) {
             snprintf(relative, sizeof(relative), "releases/%llu", publication);
             int blocked = ota_path(directory, context->directory, relative) ? -1 : ota_quarantine_blocked(context->directory, directory);

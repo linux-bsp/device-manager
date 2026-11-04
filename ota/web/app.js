@@ -6,7 +6,7 @@ function notice(message, error=false){$('notice').textContent=message;$('notice'
 function size(bytes){return (bytes/1048576).toFixed(1)+' MiB';}
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
 function detailLink(item,tab=activeTab()){const a=document.createElement('a');a.textContent='查看详情';a.href='/firmware?kind='+((item.id||'').startsWith('draft-')?'draft':'release')+'&id='+encodeURIComponent(item.id)+'&tab='+tab;return a;}
-function identityCells(row,item){cell(row,item.product||'未知');cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
+function identityCells(row,item){cell(row,FirmwareHardware.product(item.hwid||item.hwids?.[0]));cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
 function invalidButton(){const b=document.createElement('button');b.type='button';b.className='invalid';b.disabled=true;b.textContent='无效固件，禁止发布';b.title='固件已隔离，不能发布到设备';return b;}
 function publishingButton(){const b=document.createElement('button');b.type='button';b.className='publishing';b.disabled=true;b.textContent='当前发布版本';return b;}
 function activeTab(){return document.querySelector('[data-tab][aria-selected=true]')?.dataset.tab||'manage';}
@@ -15,7 +15,7 @@ const lists={manage:'drafts',history:'devices',releases:'releases',audit:'audit'
 function filterRows(tab){const tokens=$('search-'+tab).value.trim().toLowerCase().split(/\s+/).filter(Boolean);let visible=0,total=0;for(const row of $(lists[tab]).children){total++;const text=((row.dataset.search||'')+' '+row.textContent).toLowerCase();row.hidden=!tokens.every(t=>text.includes(t));if(!row.hidden)visible++;}$('count-'+tab).textContent=`${visible} / ${total} 条`;$('empty-'+tab).hidden=visible>0;}
 function downloadLink(item){const link=document.createElement('a');link.className='download';link.textContent='下载固件包';link.href='/api/download/'+(item.id.startsWith('draft-')?'draft':'release')+'/'+encodeURIComponent(item.id);return link;}
 function badge(td,text,current=false){const span=document.createElement('span');span.className='badge'+(current?' green':'');span.textContent=text;td.append(span);}
-function controls(){ const disabled=busy||!!refreshing; $('upload-button').disabled=disabled||!$('firmware').files.length; $('firmware').disabled=disabled; document.querySelectorAll('[data-refresh]').forEach(b=>b.disabled=disabled); document.querySelectorAll('[data-publish]').forEach(b=>b.disabled=disabled); }
+function controls(){ const disabled=busy||!!refreshing; $('upload-button').disabled=disabled||!$('firmware').files.length; $('firmware').disabled=disabled; document.querySelectorAll('[data-refresh]').forEach(b=>b.disabled=disabled); document.querySelectorAll('[data-publish], [data-hwid]').forEach(b=>b.disabled=disabled); }
 function state(){
  if(refreshing)return refreshing;
  refreshing=loadState().finally(()=>{refreshing=null;controls();});
@@ -33,11 +33,11 @@ async function loadState(){
  const why=r=>r==='not-reported'?'原因未上报':r==='none'?'—':r||'未上报';
  const fmt=v=>v?`v${v>>>16}.${(v>>>8)&255}.${v&255}`:'未知';
  const when=v=>new Date(v*1000).toLocaleString();
- const identity=d=>data.releases.find(r=>r.publication===d.publication)||{product:d.product,tag:fmt(d.version)};
+ const identity=d=>data.releases.find(r=>r.publication===d.publication)||{hwid:d.hwid,tag:fmt(d.version)};
  for(const [tab,list] of Object.entries(lists))$(list).replaceChildren();
  $('drafts-empty').hidden=true;$('releases-empty').hidden=true;
  const candidates=new Map();
- const firmwareKey=item=>item.firmware_id?JSON.stringify([item.product,item.layout,item.tag||item.firmware_version,item.firmware_id]):item.id;
+ const firmwareKey=item=>item.firmware_id?JSON.stringify([item.tag||item.firmware_version,item.firmware_id]):item.id;
  for(const draft of [...data.drafts].sort((a,b)=>b.created-a.created)){
   const key=firmwareKey(draft);
   if(!candidates.has(key))candidates.set(key,draft);
@@ -50,9 +50,7 @@ async function loadState(){
    const row=document.createElement('tr');if(tbody==='drafts')row.dataset.draft=d.id;
    identityCells(row,d);cell(row,size(d.bytes));
    const action=cell(row,'');
-   if(!d.valid)action.append(invalidButton());
-   else if(d.published)action.append(publishingButton());
-   else {const draft=tbody==='drafts'?d:data.drafts.find(x=>x.valid&&x.firmware_id===d.firmware_id);if(draft){const b=document.createElement('button');b.type='button';b.textContent='发布到设备';b.dataset.publish=draft.id;b.onclick=()=>publish(draft.id);action.append(b);}else action.textContent='未发布';}
+   publicationControls(action,d,data);
    cell(row,'').append(detailLink(d,tbody==='drafts'?'manage':'releases'));
    searchable(row,{...d,status:!d.valid?'无效':d.published?'已发布':'未发布',created_text:when(d.created)});$(tbody).append(row);
   }
@@ -136,11 +134,11 @@ function renderDetails(data){
  const success=history.filter(x=>x.phase==='success').length;
  const failures=history.filter(x=>x.category==='upgrade-failure');
  const incidents=history.filter(x=>x.category==='device-error');
- const active=publications.find(x=>x.published);
+ const active=publications.filter(x=>x.published).map(x=>x.hwid);
  const table=document.createElement('table');pane.append(table);
  const rows=[['上传时间',item.uploaded_at?new Date(item.uploaded_at*1000).toLocaleString():'未知'],
- ['版本号',item.tag||item.firmware_version],['内容哈希',item.firmware_id],['产品 / 布局',item.product+' / '+item.layout],
- ['固件大小',size(item.bytes)],['发布状态',active?'已发布 #'+active.publication:'未发布'],
+ ['版本号',item.tag||item.firmware_version],['内容哈希',item.firmware_id],['产品信息',FirmwareHardware.product(item.hwid||item.hwids?.[0])],
+ ['固件大小',size(item.bytes)],['发布状态',active.length?'当前 HWID 通道：'+active.join('、'):'未发布'],
  ['是否有效',item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],
  ['设备下载次数',String(sum('identified_downloads'))],['未识别设备的下载次数',String(sum('downloads')-sum('identified_downloads'))],
  ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)],
@@ -155,15 +153,31 @@ function renderDetails(data){
  const errors=failures.concat(incidents).sort((a,b)=>b.updated-a.updated);
  for(const entry of errors)pane.append(incidentEvidence(entry,item));
  if(!errors.length){const line=document.createElement('p');line.textContent='暂无失败或设备异常记录。';pane.append(line);}
- const candidate=data.drafts.find(x=>x.firmware_id===item.firmware_id&&x.valid);
- if(!item.valid)pane.append(invalidButton());
- else if(active)pane.append(publishingButton());
- if(!active&&candidate){const button=document.createElement('button');button.dataset.publish=candidate.id;button.textContent='发布到设备';button.onclick=()=>publish(candidate.id);pane.append(button);}
+ const action=document.createElement('div');action.className='publication-controls';pane.append(action);publicationControls(action,item,data);
  controls();
 }
-async function publish(id){
+function publicationControls(container,item,data){
+ const source=(item.id||'').startsWith('draft-')?item:data.drafts.find(x=>x.valid&&x.firmware_id===item.firmware_id);
+ if(!item.valid){container.append(invalidButton());return;}
+ const hwids=item.hwids||[];
+ if(!hwids.length){container.textContent='未声明适用 HWID，不能发布';return;}
+ const select=document.createElement('select');select.dataset.hwid='';select.setAttribute('aria-label','目标 HWID');
+ for(const id of hwids){const option=document.createElement('option');option.value=id;option.textContent=id;select.append(option);}
+ select.value=hwids.includes(item.hwid)?item.hwid:hwids[0];container.append(select);
+ const slot=document.createElement('div');container.append(slot);
+ const update=()=>{
+  slot.replaceChildren();select.title=FirmwareHardware.product(select.value);
+  const active=data.releases.some(x=>x.published&&x.hwid===select.value&&x.firmware_id===item.firmware_id);
+  if(active){slot.append(publishingButton());return;}
+  if(!source){slot.textContent='未发布';return;}
+  const button=document.createElement('button');button.type='button';button.textContent='发布到设备';button.dataset.publish=source.id;
+  button.onclick=()=>publish(source.id,select.value);slot.append(button);
+ };
+ select.onchange=update;update();
+}
+async function publish(id,hwid){
  busy=true;controls();
- try{const r=await fetch('/api/publish/'+id,{method:'POST',headers:{'X-OTA-Request':'1'}});const result=await r.json();if(!r.ok)throw new Error(result.error||'发布失败');notice(`已发布 #${result.publication}。设备将在下一次检查时下载该版本。`);await state();}
+ try{const r=await fetch('/api/publish/'+id+'/'+encodeURIComponent(hwid),{method:'POST',headers:{'X-OTA-Request':'1'}});const result=await r.json();if(!r.ok)throw new Error(result.error||'发布失败');notice(`已发布到 HWID ${hwid}。匹配的设备将在下次检查时获取该版本。`);await state();}
  catch(error){notice(error.message,true);}finally{busy=false;controls();}
 }
 $('firmware').addEventListener('change',()=>{const f=$('firmware').files[0];$('file-info').textContent=f?f.name+' · '+size(f.size):'';controls();});

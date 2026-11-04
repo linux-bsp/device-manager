@@ -20,12 +20,12 @@ class Context(unittest.TestCase):
         return {'X-OTA-Device':'audit-board','X-OTA-IP':ip,'X-OTA-MAC':'1c:63:49:22:c4:f7',
                 'X-OTA-Hostname':hostname,'X-OTA-Boot':boot,'X-OTA-Request':'1'}
     def report(self,phase,headers,boot='boot-a',publication=1):
-        body=f'BSPOTASTATE2 audit-board ti-am62x am62x-sd-ab-v1 {publication} 65537 {boot} {phase} 1 65537 none\n'
+        body=f'BSPOTASTATE3 audit-board 1010001000110000 {publication} 65537 {boot} {phase} 1 65537 none\n'
         return self.request('POST','/api/devices/audit-board',body,headers)[0]
     def test_snapshots_and_repeated_requests_are_durable(self):
         self.publish(self.draft())
         first=self.headers()
-        for _ in range(2):self.assertEqual(self.request('GET','/latest',headers=first)[0],200)
+        for _ in range(2):self.assertEqual(self.request('GET','/latest/1010001000110000',headers=first)[0],200)
         self.assertEqual(self.report('installing',first),200)
         second=self.headers('2001:db8::20','renamed-board','boot-b')
         self.assertEqual(self.report('success',second),200)
@@ -51,13 +51,13 @@ class Context(unittest.TestCase):
         for key,value in [('X-OTA-IP','not-an-ip'),('X-OTA-MAC','1:2:3'),('X-OTA-Hostname','<script>'),('X-OTA-Hostname','a'*254),('X-OTA-Boot','bad boot')]:
             with self.subTest(key=key):
                 h=self.headers();h[key]=value
-                self.assertEqual(self.request('GET','/latest',headers=h)[0],400)
+                self.assertEqual(self.request('GET','/latest/1010001000110000',headers=h)[0],400)
         h=self.headers();del h['X-OTA-MAC']
-        self.assertEqual(self.request('GET','/latest',headers=h)[0],400)
+        self.assertEqual(self.request('GET','/latest/1010001000110000',headers=h)[0],400)
         h=self.headers();h['X-OTA-Device']='wrong-board'
         self.assertEqual(self.report('success',h),400)
     def test_request_without_active_release_is_recorded(self):
-        self.assertEqual(self.request('GET','/latest',headers=self.headers())[0],404)
+        self.assertEqual(self.request('GET','/latest/1010001000110000',headers=self.headers())[0],204)
         with sqlite3.connect(self.feed/'firmware.db') as db:
             self.assertEqual(db.execute('select publication,hostname from device_requests').fetchone(),(0,'am625-board'))
 if __name__=='__main__':unittest.main()

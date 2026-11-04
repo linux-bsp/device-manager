@@ -59,7 +59,7 @@ void freeifaddrs(struct ifaddrs *p) { (void)p; }
         preload = self.root/'interfaces.so'
         subprocess.run(['cc','-Wall','-Wextra','-Werror','-shared','-fPIC',str(fixture),'-o',str(preload)],check=True)
         self.env = dict(os.environ, LD_PRELOAD=str(preload), TEST_NETWORK_STATE=str(self.state), TEST_CALLS=str(self.calls), PATH=str(self.bin)+':'+os.environ['PATH'])
-        self.args = [str(SOURCE/'fwctld'),'--server','http://127.0.0.1:1','--cache',str(self.root/'cache'),'--product','test','--layout','test','--interface','test0','--interval','1']
+        self.args = [str(SOURCE/'fwctld'),'--server','http://127.0.0.1:1','--cache',str(self.root/'cache'),'--hwid','1010001000110000','--interface','test0','--interval','1']
 
     def tearDown(self):
         self.temp.cleanup()

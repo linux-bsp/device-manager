@@ -77,13 +77,13 @@ void test_observe(char reason[64],int after_reboot){(void)reason;(void)after_reb
 int main(int argc,char **argv){
     if(argc!=3)return 2;
     struct ota_report r={.publication=1,.version=1,.target=1,.running=1};
-    strcpy(r.device,"test-device");strcpy(r.product,"test");strcpy(r.layout,"test");
+    strcpy(r.device,"test-device");strcpy(r.hwid,"1010001000110000");
     strcpy(r.boot,"source-a");strcpy(r.phase,"boot-testing");
     snprintf(r.reason,sizeof(r.reason),"%s",argv[2]);
     return report(argv[1],&r,"rolled-back",1)?1:0;
 }
 ''')
-        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I'+str(SOURCE/'shared'),
+        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I'+str(SOURCE/'shared'),'-I'+str(SOURCE.parent/'identity/include'),
                         '-I'+str(SOURCE/'agent'),str(source),str(SOURCE/'shared/ota-common.c'),
                         str(SOURCE/'shared/ota-report.c'),str(SOURCE/'agent/fwctld-network.c'),
                         str(SOURCE/'agent/fwctld-log.c'),'-o',str(cls.program)],check=True)

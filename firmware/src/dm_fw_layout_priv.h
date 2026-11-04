@@ -39,8 +39,6 @@ struct fw_region {
 
 struct fw_layout {
     char device[FW_PATH_SIZE];
-    char product[FW_ID_SIZE];
-    char layout_id[FW_ID_SIZE];
     char signature_key[FW_PATH_SIZE];
     char work_dir[FW_PATH_SIZE];
     char hwid_config[FW_PATH_SIZE];

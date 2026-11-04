@@ -203,3 +203,5 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 .incident-sol-link { padding: 8px 2px; }
 .firmware-hwid + .firmware-hwid { margin-top: 12px; }
 .firmware-hwid code { font-size: 14px; font-weight: 600; }
+
+[data-hwid] { max-width: 100%; font-family: monospace; margin-bottom: 8px; }

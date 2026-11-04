@@ -23,10 +23,10 @@ int ota_hwid_list_valid(const char *values)
     return 1;
 }
 
-int ota_fit_hwids(const char *directory, char values[OTA_HWIDS_SIZE])
+int ota_fit_file_hwids(const char *directory, const char *filename, char values[OTA_HWIDS_SIZE])
 {
     char path[OTA_PATH], config[128], node[256], output[OTA_HWIDS_SIZE * 3 + 32];
-    if (ota_path(path, directory, "release.itb")) return -1;
+    if (ota_path(path, directory, filename)) return -1;
     char *configuration[] = {"fdtget", "-t", "s", path, "/configurations", "default", NULL};
     if (ota_run(configuration, config, sizeof(config))) return -1;
     config[strcspn(config, "\r\n")] = 0;
@@ -56,4 +56,9 @@ int ota_fit_hwids(const char *directory, char values[OTA_HWIDS_SIZE])
         values[offset + 16] = offset + 17 < count ? ' ' : 0;
     }
     return ota_hwid_list_valid(values) ? 0 : -1;
+}
+
+int ota_fit_hwids(const char *directory, char values[OTA_HWIDS_SIZE])
+{
+    return ota_fit_file_hwids(directory, "release.itb", values);
 }

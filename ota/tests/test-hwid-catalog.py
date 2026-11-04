@@ -48,13 +48,15 @@ class Hardware(unittest.TestCase):
         self.fail('server did not restart')
 
     def bundle(self, hwids=None, raw=None):
-        files = self.http.fixture(version=1)
+        files = self.http.fixture(version=1, hwid=hwids if hwids is not None and raw is None else None)
         fit = self.http.root / 'hardware-release.itb'
         fit.write_bytes(files['release.itb'])
         if hwids is not None or raw is not None:
             arguments = ['fdtput', '-t', 's' if raw is None else 'bx', str(fit), '/configurations/conf-1', 'fw,hwids']
             arguments += hwids if raw is None else [f'{byte:x}' for byte in raw]
             subprocess.run(arguments, env=admin.ENV, check=True, capture_output=True)
+        if hwids is None and raw is None:
+            pass
         files['release.itb'] = fit.read_bytes()
         return self.http.bundle(files)
 
@@ -88,11 +90,9 @@ class Hardware(unittest.TestCase):
         h.state()
         self.assertEqual(self.counter.read_text(), '')
 
-    def test_historical_firmware_has_no_invented_hwid(self):
-        ident = self.http.draft(self.bundle())
-        self.assertEqual(self.http.state()['drafts'][0]['hwids'], [])
-        self.assertEqual(self.http.publish(ident)[0], 200)
-        self.assertEqual(self.http.state()['releases'][0]['hwids'], [])
+    def test_undeclared_firmware_cannot_be_uploaded_or_published(self):
+        self.assertEqual(self.http.upload(self.bundle())[0], 422)
+        self.assertEqual(self.http.state()['drafts'], [])
 
     def test_malformed_duplicate_and_noncanonical_hardware_are_rejected_before_draft_commit(self):
         for values in ([HWID, HWID], ['2010001000110000'], ['1010001000110001'],

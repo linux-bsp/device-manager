@@ -84,7 +84,7 @@
 <div id="file-info" class="muted"></div>
 <progress id="progress" max="100" value="0" hidden aria-label="上传进度"></progress>
 <p id="upload-status" class="muted" aria-live="polite"></p>
-</form></section><section class="card"><h2>发布固件</h2><p class="muted">产品、版本和固件 ID 从包内读取。布局与统计信息可在详情中查看。</p>
+</form></section><section class="card"><h2>发布固件</h2><p class="muted">选择固件声明的目标 HWID 后发布；每个 HWID 独立保留一个当前发布版本，产品信息从 HWID 解析。</p>
 <div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
 <div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
 </section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>
@@ -94,7 +94,7 @@
 <p class="muted">保留每次升级及各阶段上报记录。只有重启后通过健康检查，才显示升级成功。</p>
 <div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>设备</th><th>结果</th><th>最近上报</th><th>详情 / 网络审计</th></tr></thead><tbody id="devices"></tbody></table></div>
 </section><section class="card" role="tabpanel" id="panel-audit" aria-labelledby="tab-audit" hidden><h2>固件异常与回退审计</h2><p class="muted">异常固件全局停发；存在健康检查成功的历史版本时自动回退发布。保留设备、原因、固件哈希和处理动作。</p><div class="table-wrap"><table><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>时间</th><th>设备</th><th>分类 / 原因</th><th>处理动作 / 详情</th></tr></thead><tbody id="audit"></tbody></table></div></section>
-<footer>设备会自动下载已发布版本。上传但未发布的固件对设备不可见。</footer>
+<footer>设备会自动下载已发布版本。设备仅查询与自身完整 HWID 匹配的发布通道。</footer>
 </div>
 </main></div>
 <script>

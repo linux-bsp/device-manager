@@ -20,15 +20,21 @@ static int validate_fit(const char *directory, const struct release *r)
 {
     char fit[OTA_PATH], config[128], node[256], value[256];
     char hwids[OTA_HWIDS_SIZE];
-    if (ota_fit_hwids(directory, hwids)) return -1;
+    if (ota_fit_hwids(directory, hwids) || !ota_hwid_supported(hwids, r->hwid)) return -1;
+    for (unsigned i = 1; i < 3; i++) {
+        char component[OTA_HWIDS_SIZE];
+        if (ota_fit_file_hwids(directory, ota_files[i], component)) return -1;
+        for (size_t offset = 0; offset < strlen(hwids); offset += 17) {
+            char hwid[17]; memcpy(hwid, hwids + offset, 16); hwid[16] = 0;
+            if (!ota_hwid_supported(component, hwid)) return -1;
+        }
+    }
     if (ota_path(fit, directory, "release.itb") ||
         property(fit, "/configurations", "default", config, sizeof(config)) ||
         !ota_identifier(config))
         return -1;
     snprintf(node, sizeof(node), "/configurations/%s", config);
     if (property(fit, node, "fw,type", value, sizeof(value)) || strcmp(value, "release") ||
-        property(fit, node, "fw,product", value, sizeof(value)) || strcmp(value, r->product) ||
-        property(fit, node, "fw,layout-id", value, sizeof(value)) || strcmp(value, r->layout) ||
         property(fit, node, "fw,components", value, sizeof(value)) || strcmp(value, "kernel rootfs"))
         return -1;
     const char *file_keys[] = {"fw,kernel-file", "fw,rootfs-file"};
@@ -59,18 +65,11 @@ int ota_fit_version(const char *directory, unsigned long *version)
 
 int ota_inspect(const char *directory, struct release *r, unsigned long *version)
 {
-    char fit[OTA_PATH], config[128], node[256], path[OTA_PATH];
+    char path[OTA_PATH], hwids[OTA_HWIDS_SIZE];
     memset(r, 0, sizeof(*r));
-    r->version = 1; /* Draft metadata uses a placeholder publication number. */
-    if (ota_path(fit, directory, "release.itb") ||
-        property(fit, "/configurations", "default", config, sizeof(config)) ||
-        !ota_identifier(config))
-        return -1;
-    snprintf(node, sizeof(node), "/configurations/%s", config);
-    if (property(fit, node, "fw,product", r->product, sizeof(r->product)) ||
-        property(fit, node, "fw,layout-id", r->layout, sizeof(r->layout)) ||
-        !ota_identifier(r->product) || !ota_identifier(r->layout))
-        return -1;
+    r->version = 1;
+    if (ota_fit_hwids(directory, hwids) || !*hwids) return -1;
+    memcpy(r->hwid, hwids, 16); r->hwid[16] = 0;
     for (int i = 0; i < 3; i++)
         if (ota_path(path, directory, ota_files[i]) || ota_hash(path, r->hash[i], &r->size[i]))
             return -1;
@@ -80,7 +79,7 @@ int ota_inspect(const char *directory, struct release *r, unsigned long *version
 int ota_publish(int argc, char **argv)
 {
     const char *root_arg = NULL, *source_arg = NULL;
-    struct release r = {0}, old;
+    struct release r = {0};
     for (int i = 2; i < argc; i += 2) {
         if (i + 1 == argc)
             goto usage;
@@ -94,18 +93,16 @@ int ota_publish(int argc, char **argv)
             r.version = strtoull(argv[i + 1], &end, 10);
             if (errno || *end || !r.version || r.version > 2147483647)
                 goto usage;
-        } else if (!strcmp(argv[i], "--product") && ota_identifier(argv[i + 1]))
-            strcpy(r.product, argv[i + 1]);
-        else if (!strcmp(argv[i], "--layout") && ota_identifier(argv[i + 1]))
-            strcpy(r.layout, argv[i + 1]);
+        } else if (!strcmp(argv[i], "--hwid") && ota_hwid_valid(argv[i + 1]))
+            strcpy(r.hwid, argv[i + 1]);
         else
             goto usage;
     }
-    if (!root_arg || !source_arg || !r.version || !r.product[0] || !r.layout[0])
+    if (!root_arg || !source_arg || !r.version || !ota_hwid_valid(r.hwid))
         goto usage;
-    char root[OTA_PATH], source[OTA_PATH], releases[OTA_PATH], latest[OTA_PATH];
+    char root[OTA_PATH], source[OTA_PATH], releases[OTA_PATH];
     if (ota_mkdir(root_arg) || !realpath(root_arg, root) || !realpath(source_arg, source) ||
-        ota_path(releases, root, "releases") || ota_mkdir(releases) || ota_path(latest, root, "latest")) {
+        ota_path(releases, root, "releases") || ota_mkdir(releases)) {
         perror("Publication directory");
         return 1;
     }
@@ -115,11 +112,6 @@ int ota_publish(int argc, char **argv)
         return 1;
     }
     int rc = 1;
-    if (!access(latest, F_OK) && (ota_read(latest, &old) || r.version <= old.version ||
-        strcmp(r.product, old.product) || strcmp(r.layout, old.layout))) {
-        fprintf(stderr, "Use a higher publication number and the same product/layout\n");
-        goto done;
-    }
     char temp[OTA_PATH], target[OTA_PATH], name[64], from[OTA_PATH], to[OTA_PATH];
     snprintf(name, sizeof(name), "%llu", r.version);
     if (ota_path(target, releases, name) || !access(target, F_OK) ||
@@ -133,7 +125,7 @@ int ota_publish(int argc, char **argv)
             goto cleanup;
     }
     if (validate_fit(temp, &r)) {
-        fprintf(stderr, "FIT product/layout, filenames or component SHA256 mismatch\n");
+        fprintf(stderr, "FIT HWID, filenames or component SHA256 mismatch\n");
         goto cleanup;
     }
     if (ota_path(to, temp, "manifest") || ota_write(to, &r) || ota_quarantine_blocked(root, temp)) {
@@ -149,13 +141,11 @@ int ota_publish(int argc, char **argv)
         fprintf(stderr, "Cannot persist firmware identity; latest unchanged\n");
         goto done;
     }
-    snprintf(name, sizeof(name), ".latest-%ld", (long)getpid());
-    if (ota_path(to, root, name) || ota_write(to, &r) || rename(to, latest) || ota_sync_dir(root)) {
-        fprintf(stderr, "Snapshot retained; latest publication failed\n");
+    if (ota_channel_set(root, &r)) {
+        fprintf(stderr, "Snapshot retained; HWID channel publication failed\n");
         goto done;
     }
-    printf("Published %s/%s #%llu: /releases/%llu/release.itb\n",
-           r.product, r.layout, r.version, r.version);
+    printf("Published HWID %s #%llu: /releases/%llu/release.itb\n", r.hwid, r.version, r.version);
     rc = 0;
     goto done;
 cleanup:
@@ -171,6 +161,6 @@ done:
     return rc;
 usage:
     fprintf(stderr, "Usage: device-server publish --root DIR --source RELEASE_DIR "
-            "--version NUMBER --product ID --layout ID\n");
+            "--version NUMBER --hwid HEX16\n");
     return 1;
 }

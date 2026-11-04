@@ -36,6 +36,7 @@ int fwctld_network_ready(const char *interface)
 
 /* Refresh before each poll; no shell utilities or device-ID-derived MACs. */
 static char context[5][320];
+static char hardware[40];
 static int context_count;
 void fwctld_network_context(const char *interface, const char *device)
 {
@@ -81,11 +82,16 @@ void fwctld_network_context(const char *interface, const char *device)
     snprintf(context[4], sizeof(context[4]), "X-OTA-Device: %s", device);
     context_count = 5;
 }
+void fwctld_hardware_context(const char *hwid)
+{
+    snprintf(hardware, sizeof(hardware), "X-OTA-HWID: %s", hwid);
+}
 int fwctld_request(char *const args[], char *output, unsigned size)
 {
     char *request[96]; unsigned n = 0;
     while (args[n]) { if (n >= 80) return -1; request[n] = args[n]; n++; }
     for (int i = 0; i < context_count; i++) { request[n++] = "--header"; request[n++] = context[i]; }
+    if (hardware[0]) { request[n++] = "--header"; request[n++] = hardware; }
     request[n] = NULL;
     return ota_run(request, output, size);
 }

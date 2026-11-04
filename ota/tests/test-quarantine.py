@@ -10,7 +10,7 @@ admin = importlib.util.module_from_spec(spec); spec.loader.exec_module(admin)
 class Quarantine(unittest.TestCase):
     def setUp(self): admin.AdminHTTP.setUp(self)
     def report(self, publication, version, phase, device='board-a', reason='not-reported', boot='boot-one'):
-        body=f'BSPOTASTATE2 {device} ti-am62x am62x-sd-ab-v1 {publication} {version} {boot} {phase} 1 65537 {reason}\n'
+        body=f'BSPOTASTATE3 {device} 1010001000110000 {publication} {version} {boot} {phase} 1 65537 {reason}\n'
         status, response=self.request('POST','/api/devices/'+device,body,{'X-OTA-Request':'1'})
         self.assertEqual(status,200,response)
     def setup_releases(self):
@@ -52,7 +52,7 @@ class Quarantine(unittest.TestCase):
         self.assertEqual(self.request('GET','/releases/2/rootfs.itb')[0],410)
         self.assertEqual(self.request('GET','/releases/3/kernel.itb')[0],200)
         draft=self.draft(self.bundle(self.bad))
-        self.assertEqual(self.request('POST','/api/publish/'+draft,b'',{'X-OTA-Request':'1'})[0],409)
+        self.assertEqual(self.request('POST','/api/publish/'+draft+'/1010001000110000',b'',{'X-OTA-Request':'1'})[0],409)
         events=state['audit_events']
         self.assertEqual({e['action'] for e in events},{'quarantined','distribution-stopped','fallback-selected','fallback-published'})
         self.assertTrue(all(len(e['kernel_sha256'])==64 and len(e['rootfs_sha256'])==64 for e in events))
@@ -82,7 +82,7 @@ class Quarantine(unittest.TestCase):
         self.publish(self.draft())
         self.report(1,65537,'install-failed',reason='fwctl-exit-74')
         self.assertEqual(self.state()['latest'],0)
-        self.assertEqual(self.request('GET','/latest')[0],404)
+        self.assertEqual(self.request('GET','/latest/1010001000110000')[0],204)
         self.assertEqual(self.request('GET','/releases/1/release.itb')[0],410)
         self.assertIn('no-confirmed-fallback',{e['action'] for e in self.state()['audit_events']})
     def test_previous_quarantined_release_never_selected_for_fallback(self):
@@ -93,7 +93,7 @@ class Quarantine(unittest.TestCase):
         self.assertEqual(self.state()['latest'],0)
     def test_legacy_reason_is_unknown_and_history_survives_restart(self):
         self.publish(self.draft())
-        body='BSPOTASTATE1 old-board ti-am62x am62x-sd-ab-v1 1 65537 old-boot rolled-back 1 65536\n'
+        body='BSPOTASTATE3 old-board 1010001000110000 1 65537 old-boot rolled-back 1 65536 not-reported\n'
         self.assertEqual(self.request('POST','/api/devices/old-board',body,{'X-OTA-Request':'1'})[0],200)
         self.restart()
         self.assertTrue(all(e['reason']=='not-reported' for e in self.state()['audit_events']))

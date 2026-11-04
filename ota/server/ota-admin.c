@@ -299,21 +299,6 @@ int ota_draft_finish(const char *root, const char *temp, char id[32])
 }
 
 
-static unsigned long long published_number(const char *directory)
-{
-    char path[OTA_PATH];
-    unsigned long long number = 0;
-    if (!ota_path(path, directory, "published")) {
-        FILE *f = fopen(path, "r");
-        if (f) {
-            if (fscanf(f, "%llu", &number) != 1)
-                number = 0;
-            fclose(f);
-        }
-    }
-    return number;
-}
-
 static int number_id(const char *name, unsigned long long *number)
 {
     char *end, canonical[32];
@@ -327,6 +312,7 @@ static int number_id(const char *name, unsigned long long *number)
 
 static int list_entries(FILE *f, const char *root, int draft, unsigned long long active)
 {
+    (void)active;
     char base[OTA_PATH], directory[OTA_PATH], path[OTA_PATH];
     if (ota_path(base, root, draft ? "drafts" : "releases"))
         return -1;
@@ -354,16 +340,28 @@ static int list_entries(FILE *f, const char *root, int draft, unsigned long long
             closedir(dir);
             return -1;
         }
-        unsigned long long published = draft ? published_number(directory) : number;
+        unsigned long long published = draft ? 0 : number;
+        int is_active = !draft && ota_channel_active(root, &r);
+        if (draft) {
+            for (size_t offset = 0; offset < strlen(identity.hwids); offset += 17) {
+                char hwid[17], relative[64], candidate[OTA_PATH]; struct release channel;
+                memcpy(hwid, identity.hwids + offset, 16); hwid[16] = 0;
+                if (ota_channel_read(root, hwid, &channel)) continue;
+                snprintf(relative, sizeof(relative), "releases/%llu", channel.version);
+                struct ota_catalog_identity selected;
+                if (ota_path(candidate, root, relative) || ota_catalog_get(root, candidate, &selected)) { closedir(dir); return -1; }
+                if (!strcmp(identity.hash, selected.hash)) { published = channel.version; is_active = 1; }
+            }
+        }
         int blocked = ota_quarantine_hashes_blocked(root, identity.kernel, identity.rootfs);
         if (blocked < 0) { closedir(dir); return -1; }
         if (count > 1)
             fputc(',', f);
-        fprintf(f, "{\"id\":\"%s\",\"product\":\"%s\",\"layout\":\"%s\","
+        fprintf(f, "{\"id\":\"%s\",\"hwid\":\"%s\","
             "\"firmware_version\":\"%s\",\"publication\":%llu,\"bytes\":%llu,\"created\":%lld,\"quarantined\":%s,\"tag\":\"v%s\",\"firmware_id\":\"%s\",\"uploaded_at\":%lld,\"valid\":%s,\"published\":%s,\"hwids\":[",
-            entry->d_name, r.product, r.layout, identity.tag + 1, published,
+            entry->d_name, r.hwid, identity.tag + 1, published,
             r.size[0] + r.size[1] + r.size[2], (long long)st.st_mtime, blocked ? "true" : "false", identity.tag + 1, identity.hash, identity.uploaded_at,
-            blocked ? "false" : "true", published && published == active && !blocked ? "true" : "false");
+            blocked ? "false" : "true", is_active && !blocked ? "true" : "false");
         for (size_t offset = 0; offset < strlen(identity.hwids); offset += 17)
             fprintf(f, "%s\"%.16s\"", offset ? "," : "", identity.hwids + offset);
         fputs("]}", f);
@@ -374,16 +372,7 @@ static int list_entries(FILE *f, const char *root, int draft, unsigned long long
 
 int ota_admin_state(const char *root, char **json)
 {
-    char path[OTA_PATH];
-    struct release latest;
-    unsigned long long number = 0;
-    if (ota_path(path, root, "latest"))
-        return -1;
-    if (!access(path, F_OK)) {
-        if (ota_read(path, &latest))
-            return -1;
-        number = latest.version;
-    }
+    unsigned long long number = ota_channel_max(root);
     size_t size;
     *json = NULL;
     FILE *f = open_memstream(json, &size);
@@ -403,6 +392,8 @@ int ota_admin_state(const char *root, char **json)
     failed |= ota_history_summary(root, f);
     fprintf(f, "],\"audit_events\":[");
     failed |= ota_quarantine_json(root, f);
+    fprintf(f, "],\"channels\":[");
+    failed |= ota_channels_json(root, f);
     fprintf(f, "]}\n");
     if (fclose(f))
         failed = 1;
@@ -414,67 +405,28 @@ int ota_admin_state(const char *root, char **json)
     return 0;
 }
 
-int ota_admin_publish(const char *root, const char *id, unsigned long long *number)
+int ota_admin_publish(const char *root, const char *id, const char *hwid, unsigned long long *number)
 {
-    if (!draft_id(id))
-        return 404;
-    char drafts[OTA_PATH], source[OTA_PATH], latest_path[OTA_PATH], releases[OTA_PATH];
-    if (ota_path(drafts, root, "drafts") || ota_path(source, drafts, id) || !regular_directory(source))
-        return 404;
-    struct release r, latest;
-    unsigned long fit_version;
-    if (ota_inspect(source, &r, &fit_version))
-        return 422;
+    if (!draft_id(id) || !ota_hwid_valid(hwid)) return 404;
+    char drafts[OTA_PATH], source[OTA_PATH];
+    if (ota_path(drafts, root, "drafts") || ota_path(source, drafts, id) || !regular_directory(source)) return 404;
+    struct release r, latest; unsigned long version;
+    char hwids[OTA_HWIDS_SIZE];
+    if (ota_inspect(source, &r, &version) || ota_fit_hwids(source, hwids) || !ota_hwid_supported(hwids, hwid)) return 422;
     int blocked = ota_quarantine_blocked(root, source);
     if (blocked) return blocked > 0 ? 409 : 503;
-    unsigned long long previous = published_number(source);
-    if (previous && !ota_path(latest_path, root, "latest") &&
-        !ota_read(latest_path, &latest) && latest.version == previous) {
-        *number = previous;
-        return 200; /* Repeated clicks on the active publication are idempotent. */
+    if (!ota_channel_read(root, hwid, &latest)) {
+        char relative[64], directory[OTA_PATH]; struct ota_catalog_identity current, candidate;
+        snprintf(relative, sizeof(relative), "releases/%llu", latest.version);
+        if (ota_path(directory, root, relative) || ota_catalog_get(root, directory, &current) || ota_catalog_get(root, source, &candidate)) return 503;
+        if (!strcmp(current.hash, candidate.hash)) { *number = latest.version; return 200; }
     }
-    *number = 1;
-    if (ota_path(latest_path, root, "latest") || ota_path(releases, root, "releases"))
-        return 500;
-    if (!access(latest_path, F_OK)) {
-        if (ota_read(latest_path, &latest))
-            return 500;
-        if (strcmp(r.product, latest.product) || strcmp(r.layout, latest.layout))
-            return 409;
-        *number = latest.version + 1;
-    }
-    /* Skip an orphaned snapshot left by an interrupted CLI publication. */
-    DIR *dir = opendir(releases);
-    if (dir) {
-        struct dirent *entry;
-        while ((entry = readdir(dir))) {
-            unsigned long long n;
-            if (number_id(entry->d_name, &n) && n >= *number)
-                *number = n + 1;
-        }
-        closedir(dir);
-    } else if (errno != ENOENT) {
-        return 500;
-    }
-    if (*number > 2147483647)
-        return 409;
-    char value[32];
-    snprintf(value, sizeof(value), "%llu", *number);
+    *number = ota_publication_next(root);
+    if (!*number) return 409;
+    char value[32]; snprintf(value, sizeof(value), "%llu", *number);
     char *args[] = {"device-server", "publish", "--root", (char *)root, "--source", source,
-        "--version", value, "--product", r.product, "--layout", r.layout, NULL};
-    if (ota_publish(12, args))
-        return 409; /* Includes concurrent CLI publication or a full filesystem. */
-    char marker[OTA_PATH];
-    if (!ota_path(marker, source, "published")) {
-        FILE *f = fopen(marker, "w");
-        if (f) {
-            fprintf(f, "%llu\n", *number);
-            fflush(f);
-            fsync(fileno(f));
-            fclose(f);
-        }
-    }
-    return 200;
+        "--version", value, "--hwid", (char *)hwid, NULL};
+    return ota_publish(10, args) ? 409 : 200;
 }
 
 /* Explicit management export, including quarantined firmware for audit. Device
@@ -489,8 +441,9 @@ int ota_admin_bundle(const char *root, const char *kind, const char *id,
         (strcmp(kind, "draft") && strcmp(kind, "release"))) return -ENOENT;
     if (ota_path(base, root, !strcmp(kind, "draft") ? "drafts" : "releases") ||
         ota_path(directory, base, id) || !regular_directory(directory)) return -ENOENT;
-    struct release release; unsigned long version; struct ota_catalog_identity identity;
-    if (ota_inspect(directory, &release, &version) || ota_catalog_get(root, directory, &identity)) return -EIO;
+    struct release release; struct ota_catalog_identity identity; char manifest[OTA_PATH];
+    if (ota_path(manifest, directory, "manifest") || ota_read(manifest, &release) ||
+        ota_verify(directory, &release) || ota_catalog_get(root, directory, &identity)) return -EIO;
     if (!mkdtemp(temporary)) return -EIO;
     int fd = -EIO;
     if (ota_path(archive, temporary, "firmware.tar.gz")) { rmdir(temporary); return -EIO; }

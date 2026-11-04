@@ -4,18 +4,19 @@
 #include <stdio.h>
 #define OTA_REPORT_SIZE 768
 struct ota_report {
-    char device[64], product[64], layout[64], boot[64], phase[32], reason[64];
+    char device[64], hwid[17], boot[64], phase[32], reason[64];
     unsigned long long publication;
     unsigned version, target, running;
 };
 int ota_report_parse(const char *text, struct ota_report *r);
 int ota_report_format(char text[OTA_REPORT_SIZE], const struct ota_report *r);
 int ota_device_read(const char *root, const char *device, char text[OTA_REPORT_SIZE]);
+int ota_report_targets(const char *root, const struct ota_report *report);
 int ota_device_write(const char *root, const struct ota_report *r);
 int ota_report_incident(const struct ota_report *r);
 const char *ota_report_category(const struct ota_report *r);
 int ota_history_summary(const char *root, FILE *out);
-unsigned long long ota_history_last_good(const char *root, unsigned long long before, const char *product, const char *layout);
+unsigned long long ota_history_last_good(const char *root, unsigned long long before, const char *hwid);
 int ota_history_incidents(const char *root);
 int ota_history_seed(const char *root);
 int ota_history_record(const char *root, const struct ota_report *r);

@@ -9,6 +9,10 @@ const FirmwareHardware = {
             pcbVersion: `v${parseInt(pcb[0], 16)}.${parseInt(pcb[1], 16)}`,
             grouped: `${value[0]}-${line}-${project}-${model}-${pcb}-${value.slice(13)}`};
     },
+    product(value) {
+        const h = this.parse(value);
+        return h ? `产品线 ${h.line} · 项目 ${h.project} · 型号 ${h.model} · PCB ${h.pcbVersion}` : '未知硬件';
+    },
     describe(value) {
         const h = this.parse(value);
         return h ? `${h.grouped} · 编码 v${h.format} · 产品线 ${h.line} · 项目 ${h.project} · 产品型号 ${h.model} · PCB ${h.pcbVersion} · 保留 ${h.reserved}` : 'HWID 编码无效';

@@ -26,8 +26,7 @@ static int same_transaction(const struct ota_report *a, const struct ota_report 
 {
     return !strcmp(a->device, b->device) && !strcmp(a->boot, b->boot) &&
         a->publication == b->publication && a->version == b->version &&
-        a->target == b->target && !strcmp(a->product, b->product) &&
-        !strcmp(a->layout, b->layout);
+        a->target == b->target && !strcmp(a->hwid, b->hwid);
 }
 
 /* Copy validated lines, optionally emit events. Never silently drop corruption. */
@@ -147,10 +146,10 @@ int ota_history_json(const char *root, FILE *out)
                 free(events); rc = -1; break;
             }
             fprintf(out, "%s{\"device\":\"%s\",\"publication\":%llu,\"version\":%u,"
-                "\"target\":%u,\"source_boot\":\"%s\",\"product\":\"%s\",\"layout\":\"%s\","
+                "\"target\":%u,\"source_boot\":\"%s\",\"hwid\":\"%s\","
                 "\"running\":%u,\"phase\":\"%s\",\"started\":%lld,\"updated\":%lld,"
                 "\"imported\":%s,\"events\":[%s],\"category\":\"%s\",\"reason\":\"%s\",\"network\":[", count++ ? "," : "", r->device,
-                r->publication, r->version, r->target, r->boot, r->product, r->layout,
+                r->publication, r->version, r->target, r->boot, r->hwid,
                 r->running, r->phase, h.first, h.updated, h.imported ? "true" : "false", events, ota_report_category(r), r->reason[0] ? r->reason : "not-reported");
             if (ota_catalog_network_json(root, out, r)) { free(events); rc = -1; break; }
             fputs("]}", out);
@@ -198,22 +197,24 @@ static int walk_history(const char *root, int (*visit)(const struct history *, v
     closedir(devices); return rc;
 }
 
-struct good_query { const char *root, *product, *layout; unsigned long long before, best; };
+struct good_query { const char *root, *hwid; unsigned long long before, best; };
 static int find_good(const struct history *h, void *context)
 {
     struct good_query *q = context; const struct ota_report *r = &h->last;
     if (strcmp(r->phase, "success") || r->publication >= q->before || r->publication <= q->best ||
-        strcmp(r->product, q->product) || strcmp(r->layout, q->layout)) return 0;
+        strcmp(r->hwid, q->hwid)) return 0;
     char directory[OTA_PATH], relative[64];
     snprintf(relative, sizeof(relative), "releases/%llu", r->publication);
     if (ota_path(directory, q->root, relative)) return -1;
-    if (!ota_quarantine_blocked(q->root, directory)) q->best = r->publication;
+    struct release release; unsigned long version;
+    if (!ota_inspect(directory, &release, &version) &&
+        !ota_quarantine_blocked(q->root, directory)) q->best = r->publication;
     return 0;
 }
 unsigned long long ota_history_last_good(const char *root, unsigned long long before,
-                                        const char *product, const char *layout)
+                                        const char *hwid)
 {
-    struct good_query q = {root, product, layout, before, 0};
+    struct good_query q = {root, hwid, before, 0};
     return walk_history(root, find_good, &q) ? 0 : q.best;
 }
 static int replay_incident(const struct history *h, void *context)
@@ -228,10 +229,10 @@ static int replay_incident(const struct history *h, void *context)
      * a different release is active. Never skip replay for the active image. */
     char latest_path[OTA_PATH], audit_path[OTA_PATH], relative[256];
     struct release active;
-    int length = snprintf(relative, sizeof(relative), "audit/%llu-%s-%s-%s-quarantined-0",
-                          r->publication, r->device, r->boot, r->phase);
+    int length = snprintf(relative, sizeof(relative), "audit/%llu-%s-%s-%s-quarantined-0-%s",
+                          r->publication, r->device, r->boot, r->phase, r->hwid);
     if (length > 0 && (size_t)length < sizeof(relative) &&
-        !ota_path(latest_path, root, "latest") && !ota_read(latest_path, &active) &&
+        !ota_channel_path(root, r->hwid, latest_path) && !ota_read(latest_path, &active) &&
         active.version != r->publication && !ota_path(audit_path, root, relative)) {
         int fd = open(audit_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
         if (fd >= 0) {
@@ -241,11 +242,11 @@ static int replay_incident(const struct history *h, void *context)
                 char header[512], report[OTA_REPORT_SIZE], expected[OTA_REPORT_SIZE];
                 long long when;
                 unsigned long long failed, source, replacement;
-                char kernel[65], rootfs[65], extra;
+                char kernel[65], rootfs[65], channel[17], extra;
                 int valid = fgets(header, sizeof(header), file) &&
                     fgets(report, sizeof(report), file) &&
-                    sscanf(header, "BSPOTAAUDIT1 %lld quarantined %llu %llu %llu %64s %64s %c",
-                           &when, &failed, &source, &replacement, kernel, rootfs, &extra) == 6 &&
+                    sscanf(header, "BSPOTAAUDIT2 %lld quarantined %llu %llu %llu %64s %64s %16s %c",
+                           &when, &failed, &source, &replacement, kernel, rootfs, channel, &extra) == 7 && !strcmp(channel, r->hwid) &&
                     failed == r->publication && !ota_report_format(expected, r) &&
                     !strcmp(report, expected) &&
                     ota_quarantine_hashes_blocked(root, kernel, rootfs) == 1;

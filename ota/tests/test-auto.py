@@ -56,7 +56,7 @@ class AutomaticOTA(unittest.TestCase):
         self.snapshot.write_text(status)
 
     def publish(self, ident):
-        status, body = super().publish(ident)
+        status, body = admin.AdminHTTP.publish(self, ident)
         if status == 200:
             publication = json.loads(body)['publication']
             version = self.request('GET', f'/releases/{publication}/info')[1].decode().split()[2]
@@ -68,7 +68,7 @@ class AutomaticOTA(unittest.TestCase):
 
     def agent(self, ok=True, force=False):
         r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
-            '--cache', str(self.root/'cache'), '--product', 'ti-am62x', '--layout', 'am62x-sd-ab-v1',
+            '--cache', str(self.root/'cache'), '--hwid', '1010001000110000',
             '--auto-install', '--device', 'board-01', '--once'] + (['--force'] if force else []), env=self.env, capture_output=True, text=True)
         if ok: self.assertEqual(r.returncode, 0, r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode, 0, r.stdout+r.stderr)
@@ -96,7 +96,7 @@ class AutomaticOTA(unittest.TestCase):
             self.fail('Expected progress before blocked operation completes')
         with log.open('w') as stream:
             proc=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.port}',
-                '--cache',str(self.root/'cache'),'--product','ti-am62x','--layout','am62x-sd-ab-v1',
+                '--cache',str(self.root/'cache'),'--hwid', '1010001000110000',
                 '--auto-install','--device','board-01','--console',str(console),'--once'],env=self.env,stdout=stream,stderr=stream)
             try:
                 until(download_wait.exists)
@@ -152,7 +152,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertNotIn('Ready: fwctl update',result.stdout)
         self.agent()
         self.assertFalse(self.unexpected_download.exists())
-        self.assertFalse((self.root/'cache/1').exists())
+        self.assertFalse((self.root/'cache/1010001000110000/1').exists())
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')
 
     def test_request_context_survives_reboot_and_health_confirmation(self):
@@ -210,7 +210,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertIn('rolled-back', history)
 
     def test_absent_publication_is_normal_waiting(self):
-        (self.feed/'latest').unlink()
+        (self.feed/'channels/1010001000110000').unlink()
         result = self.agent()
         self.assertIn('No active OTA publication; waiting', result.stdout)
         self.assertNotIn('failed', result.stdout + result.stderr)
@@ -221,7 +221,7 @@ class AutomaticOTA(unittest.TestCase):
         self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
         self.agent()
         draft = self.draft(self.bundle(self.files))
-        self.assertEqual(self.request('POST', '/api/publish/'+draft, b'', {'X-OTA-Request':'1'})[0], 409)
+        self.assertEqual(self.request('POST', '/api/publish/'+draft+'/1010001000110000', b'', {'X-OTA-Request':'1'})[0], 409)
         self.assertEqual(self.state()['latest'], 0)
         status, body = self.request('GET', '/api/policy/another-board/1')
         self.assertEqual(status, 200)
@@ -248,20 +248,20 @@ class AutomaticOTA(unittest.TestCase):
         shutil.rmtree(self.root/'cache')
         self.agent()
         self.assertEqual(self.phase(),'success')
-        self.assertFalse((self.root/'cache/1').exists())
+        self.assertFalse((self.root/'cache/1010001000110000/1').exists())
         self.publish(self.draft(self.bundle(self.fixture(65538))))
         fw=self.bin/'fwctl'
         self.agent()
         self.assertEqual(self.phase(),'rebooting')
         self.assertEqual(self.state()['devices'][0]['publication'],2)
-        self.assertTrue((self.root/'cache/2/rootfs.itb').exists())
+        self.assertTrue((self.root/'cache/1010001000110000/2/rootfs.itb').exists())
         self.assertEqual(self.calls.read_text(),'install\nreboot\ninstall\nreboot\n')
 
     def test_auto_existing_version_not_installed(self):
         self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
         self.agent()
         self.assertFalse(self.state()['devices'])
-        self.assertFalse((self.root/'cache/1').exists())
+        self.assertFalse((self.root/'cache/1010001000110000/1').exists())
         self.assertFalse(self.calls.exists())
 
     def test_matching_version_corrupt_contents_reinstalled(self):
@@ -273,7 +273,7 @@ class AutomaticOTA(unittest.TestCase):
     def test_force_reinstalls_matching_image_and_refreshes_cache(self):
         self.write_snapshot('FWOTA1 0 0 255 65537 1 4 0 0 0\n')
         # Seed a corrupt payload cache to ensure forced recovery downloads again.
-        cache = self.root/'cache/1'
+        cache = self.root/'cache/1010001000110000/1'
         cache.mkdir(parents=True)
         (cache/'rootfs.itb').write_bytes(b'broken cache')
         result = self.agent(force=True)
@@ -322,7 +322,7 @@ class AutomaticOTA(unittest.TestCase):
 
     def test_auto_interrupted_before_write(self):
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-        body = f'BSPOTASTATE1 board-01 ti-am62x am62x-sd-ab-v1 1 65537 {boot} installing 1 65536\n'
+        body = f'BSPOTASTATE3 board-01 1010001000110000 1 65537 {boot} installing 1 65536 not-reported\n'
         self.assertEqual(self.request('POST', '/api/devices/board-01', body, {'X-OTA-Request':'1'})[0], 200)
         self.agent()
         self.assertEqual(self.phase(), 'interrupted')
@@ -333,15 +333,15 @@ class AutomaticOTA(unittest.TestCase):
     def test_report_validation_and_persistence(self):
         self.assertEqual(self.request('GET', '/api/devices/new-board')[0], 204)
         for ident, body in [('..','bad'), ('board-01','bad'),
-            ('board-01','BSPOTASTATE1 other ti-am62x am62x-sd-ab-v1 1 65537 boot success 1 65537\n'),
-            ('board-01','BSPOTASTATE1 board-01 ti-am62x am62x-sd-ab-v1 1 4294967297 boot success 1 65537\n')]:
+            ('board-01','BSPOTASTATE3 other 1010001000110000 1 65537 boot success 1 65537 not-reported\n'),
+            ('board-01','BSPOTASTATE3 board-01 1010001000110000 1 4294967297 boot success 1 65537 not-reported\n')]:
             self.assertEqual(self.request('POST', '/api/devices/'+ident, body, {'X-OTA-Request':'1'})[0], 400)
         self.agent()
         self.assertTrue((self.feed/'devices/board-01').is_file())
         self.assertEqual(self.request('GET','/api/devices/board-01')[0], 200)
 
     def kernel_bundle(self, version, payload='kernel'):
-        dts = f'/dts-v1/; / {{ description="{payload}"; configurations {{ default="c"; c {{ fw,version=<{version}>; }}; }}; }};'
+        dts = f'/dts-v1/; / {{ description="{payload}"; configurations {{ default="c"; c {{ fw,hwids="1010001000110000"; fw,version=<{version}>; }}; }}; }};'
         kernel = subprocess.run(['dtc','-I','dts','-O','dtb'], input=dts.encode(),capture_output=True,check=True,env=admin.ENV).stdout
         files = self.fixture(version=version)
         oldhash = hashlib.sha256(files['kernel.itb']).hexdigest().encode()
@@ -359,24 +359,24 @@ class AutomaticOTA(unittest.TestCase):
         firmware_id = hashlib.sha256(
             f'BSPFWCONTENT1\nkernel {kernel_bytes} {kernel_hash}\nrootfs {root_bytes} {root_hash}\n'.encode()
         ).hexdigest()
-        path = f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{version}/{firmware_id}/{digest}/rootfs.itb'
+        path = f'/recovery/1010001000110000/rootfs/{version}/{firmware_id}/{digest}/rootfs.itb'
         self.assertEqual(self.request('GET', path), (200, self.files['rootfs.itb']))
         self.assertEqual(self.request('GET', path.replace(digest, '0'*64))[0], 404)
-        self.assertEqual(self.request('GET', path.replace('ti-am62x', 'wrong'))[0], 404)
+        self.assertEqual(self.request('GET', path.replace('1010001000110000', '1010002000110000'))[0], 404)
         self.assertEqual(self.request('GET', path+'/extra')[0], 404)
         self.assertEqual(self.request('GET', path.replace(digest, 'x'*64))[0], 404)
 
     def test_recovery_exact_version_and_ambiguity(self):
         bundle, kernel = self.kernel_bundle(65538)
         self.assertEqual(self.publish(self.draft(bundle))[0], 200)
-        image = self.request('GET', '/releases/1/identity')[1].decode().split()
+        image = self.request('GET', '/releases/2/identity')[1].decode().split()
         firmware_id = hashlib.sha256(
             f'BSPFWCONTENT1\nkernel {image[3]} {image[4]}\nrootfs {image[5]} {image[6]}\n'.encode()
         ).hexdigest()
-        path=f'/recovery/ti-am62x/am62x-sd-ab-v1/kernel/65538/{firmware_id}/kernel.itb'
+        path=f'/recovery/1010001000110000/kernel/65538/{firmware_id}/kernel.itb'
         self.assertEqual(self.request('GET',path), (200,kernel))
         self.assertEqual(self.request('GET',path.replace('/65538/','/65539/'))[0],404)
-        self.assertEqual(self.request('GET',path.replace('ti-am62x','wrong'))[0],404)
+        self.assertEqual(self.request('GET',path.replace('1010001000110000','1010002000110000'))[0],404)
         self.assertEqual(self.request('GET','/releases/2/info'), (200,b'BSPOTAINFO1 2 65538\n'))
         self.assertEqual(self.request('GET',path+'/extra')[0],404)
         # Same version with different bytes gets a different content ID.
@@ -384,7 +384,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.publish(self.draft(other))[0],200)
         self.assertEqual(self.request('GET',path), (200,kernel))
 
-for name in ('tearDown', 'fixture', 'bundle', 'request', 'upload', 'state', 'publish', 'draft'):
+for name in ('tearDown', 'fixture', 'bundle', 'request', 'upload', 'state', 'draft'):
     setattr(AutomaticOTA, name, admin.AdminHTTP.__dict__[name])
 
 if __name__ == '__main__':

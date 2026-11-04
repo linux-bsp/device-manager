@@ -125,12 +125,8 @@ static int set_config_value(struct fw_layout *layout, const char *key,
     if (!strcmp(key, "update-protocol") || !strcmp(key, "update-server") ||
         !strcmp(key, "update-path") || !strcmp(key, "update-release"))
         return *value ? 0 : -EINVAL;
-    if (!strcmp(key, "product"))
-        return copy_string(layout->product, sizeof(layout->product), value);
     if (!strcmp(key, "hwid-config"))
         return copy_string(layout->hwid_config, sizeof(layout->hwid_config), value);
-    if (!strcmp(key, "layout-id"))
-        return copy_string(layout->layout_id, sizeof(layout->layout_id), value);
     if (!strcmp(key, "signature-key")) {
         if (!*value) {
             layout->signature_key[0] = '\0';
@@ -200,9 +196,8 @@ int fw_layout_validate(const struct fw_layout *layout, uint64_t capacity,
     unsigned int i;
     unsigned int j;
 
-    if (!layout || !layout->device[0] || !layout->product[0] ||
-        !write_size ||
-        !layout->layout_id[0] || !layout->attempts || !layout->work_dir[0])
+    if (!layout || !layout->device[0] || !write_size ||
+        !layout->attempts || !layout->work_dir[0])
         return -EINVAL;
     if (layout->require_signature && !layout->signature_key[0])
         return -EINVAL;

@@ -26,9 +26,9 @@ class CLI(unittest.TestCase):
         state=json.loads(self.cli('list').stdout)
         self.assertEqual(state['drafts'][0]['id'],draft)
         self.assertIn('\n  "latest":',self.cli('list').stdout)
-        publication=json.loads(self.cli('publish',draft).stdout)['publication']
+        publication=json.loads(self.cli('publish',draft,'--hwid','1010001000110000').stdout)['publication']
         self.assertEqual(publication,1)
-        self.assertEqual(json.loads(self.cli('publish',draft,'--json').stdout)['publication'],1)
+        self.assertEqual(json.loads(self.cli('publish',draft,'--hwid','1010001000110000','--json').stdout)['publication'],1)
         self.assertEqual(self.state()['latest'],1)
     def test_cli_server_overrides_environment_and_json_is_exact(self):
         env=dict(self.env,OTA_SERVER='http://127.0.0.1:1')
@@ -42,10 +42,10 @@ class CLI(unittest.TestCase):
         self.assertEqual(self.state()['latest'],0)
         self.assertEqual(self.state()['drafts'],[])
     def test_missing_draft_and_explicit_older_target(self):
-        self.assertIn('HTTP',self.cli('publish','draft-missing',ok=False).stderr)
+        self.assertIn('HTTP',self.cli('publish','draft-missing','--hwid','1010001000110000',ok=False).stderr)
         newer=self.root/'new.tar.gz';newer.write_bytes(self.bundle(self.fixture(65538)))
-        new_id=json.loads(self.cli('upload',newer).stdout)['id'];self.cli('publish',new_id)
-        old_id=json.loads(self.cli('upload',self.package).stdout)['id'];self.cli('publish',old_id)
+        new_id=json.loads(self.cli('upload',newer).stdout)['id'];self.cli('publish',new_id,'--hwid','1010001000110000')
+        old_id=json.loads(self.cli('upload',self.package).stdout)['id'];self.cli('publish',old_id,'--hwid','1010001000110000')
         self.assertEqual(self.state()['latest'],2)
     def test_invalid_arguments_and_files(self):
         self.cli('--help')
@@ -66,7 +66,7 @@ class CLI(unittest.TestCase):
         package=Path(os.environ['OTA_CLI_TEST_PACKAGE'])
         draft=json.loads(self.cli('upload',package).stdout)['id']
         self.assertEqual(self.state()['latest'],0)
-        publication=json.loads(self.cli('publish',draft).stdout)['publication']
+        publication=json.loads(self.cli('publish',draft,'--hwid','1010001000110000').stdout)['publication']
         identity_status, identity = self.request('GET', f'/releases/{publication}/identity')
         self.assertEqual(identity_status, 200, identity)
         self.assertTrue(identity.startswith(f'BSPOTAIMAGE1 {publication} '.encode()))
@@ -89,11 +89,11 @@ class CLI(unittest.TestCase):
         firmware_version=int(fields[2]);root_hash=fields[6]
         firmware_id=version.decode().split()[3]
         restore_status, restore_package = self.request('GET',
-            f'/recovery/ti-am62x/am62x-sd-ab-v1/rootfs/{firmware_version}/{firmware_id}/{root_hash}/rootfs.itb')
+            f'/recovery/1010001000110000/rootfs/{firmware_version}/{firmware_id}/{root_hash}/rootfs.itb')
         self.assertEqual(restore_status, 200)
         cache=self.root/'downloaded'
         agent=subprocess.run([str(admin.SOURCE/'fwctld'),'--server',self.env['OTA_SERVER'],
-            '--cache',str(cache),'--product','ti-am62x','--layout','am62x-sd-ab-v1','--once'],
+            '--cache',str(cache),'--hwid', '1010001000110000','--once'],
             env=self.env,capture_output=True,text=True,timeout=60)
         self.assertEqual(agent.returncode,0,agent.stdout+agent.stderr)
         with tarfile.open(package,'r:gz') as archive:
@@ -106,7 +106,7 @@ class CLI(unittest.TestCase):
 
     def test_list_preserves_device_history(self):
         for publication in (1,2):
-            body=f'BSPOTASTATE1 cli-board ti-am62x am62x-sd-ab-v1 {publication} 65538 boot-{publication} success 1 65538\n'
+            body=f'BSPOTASTATE3 cli-board 1010001000110000 {publication} 65538 boot-{publication} success 1 65538 not-reported\n'
             self.assertEqual(self.request('POST','/api/devices/cli-board',body,{'X-OTA-Request':'1'})[0],200)
         self.assertEqual(len(json.loads(self.cli('list').stdout)['device_history']),2)
 for name in ('tearDown','fixture','bundle','request','state'):

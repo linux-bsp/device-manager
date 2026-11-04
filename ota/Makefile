@@ -28,6 +28,7 @@ test: all
 	python3 ./tests/test-admin.py
 	python3 ./tests/test-catalog.py
 	python3 ./tests/test-hwid-catalog.py
+	python3 ./tests/test-hwid-channels.py
 	python3 ./tests/test-auto.py
 	python3 ./tests/test-init.py
 	python3 ./tests/test-network.py

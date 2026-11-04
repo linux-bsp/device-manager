@@ -12,8 +12,8 @@ sol_tests=importlib.util.module_from_spec(spec);spec.loader.exec_module(sol_test
 
 class IncidentEvidence(sol_tests.SOL):
     def report(self,phase,observed='source-a',reason='none',source='source-a',publication=1):
-        body=f'BSPOTASTATE2 device-a test test {publication} 1 {source} {phase} 1 1 {reason}\n'.encode()
-        headers={'X-OTA-Request':'1','X-OTA-Device':'device-a','X-OTA-IP':'192.0.2.10',
+        body=f'BSPOTASTATE3 device-a 1010001000110000 {publication} 1 {source} {phase} 1 1 {reason}\n'.encode()
+        headers={'X-OTA-HWID':'1010001000110000','X-OTA-Request':'1','X-OTA-Device':'device-a','X-OTA-IP':'192.0.2.10',
                  'X-OTA-MAC':'02:00:00:00:00:01','X-OTA-Hostname':'test-board','X-OTA-Boot':observed}
         return self.request('/api/devices/device-a',data=body,key=self.key,headers=headers)
 
@@ -23,7 +23,7 @@ class IncidentEvidence(sol_tests.SOL):
             return super().request(path,data,key,headers)
         import urllib.request
         import urllib.error
-        request=urllib.request.Request(self.url+path,data=data,headers=headers or {})
+        request=urllib.request.Request(self.url+path,data=data,headers={'X-OTA-HWID':'1010001000110000',**(headers or {})})
         try:response=self.http.open(request,timeout=5)
         except urllib.error.HTTPError as error:response=error
         with response:return response.status,response.read()

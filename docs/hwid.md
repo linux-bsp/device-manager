@@ -39,7 +39,7 @@ SPL 在 MMC/SPI 可用后加载环境，读取 hwid。R5 和 A53 环境大小、
 
 完整 U-Boot 输出环境身份，并通过 `/chosen/dm,hwid` 传给 Linux。无 SPL 的设备直接使用完整 U-Boot 环境。initramfs 和 fwctl 从相同环境读取。
 
-AM625 新版固件配置的 `hwid-config=/etc/fw_env.config` 要求 FIT 的 `fw,hwids` 列表包含设备完整 HWID。release、bootloader、kernel、rootfs 校验及恢复写入执行身份检查，不根据版本相近推断兼容。
+AM625 新版固件配置的 `hwid-config=/etc/fw_env.config` 要求 FIT 的 `fw,hwids` 列表包含设备完整 HWID。release、bootloader、kernel、rootfs 校验及恢复写入仅按完整 HWID 检查，不再使用独立的产品或布局身份字段。物理分区偏移、容量和擦除约束仍由 BSP 配置。
 
 修改后重启，使启动设备树与各阶段统一为新身份。`fwctl hwid show` 显示当前保存的值。工厂整卡镜像包含两份完整默认环境及分配的 HWID；普通 OTA 不覆盖环境区。恢复默认环境或重刷工厂环境后，需要核对人工配置的身份。
 
@@ -49,7 +49,18 @@ AM625 新版固件配置的 `hwid-config=/etc/fw_env.config` 要求 FIT 的 `fw,
 
 刷新页面从数据库读取，旧数据库首次读取时仅补充 HWID 元数据，不重新计算固件哈希。缺少声明的历史记录保留原状；新上传的非规范、重复或过长声明会被拒绝。
 
-当前服务端仍按 product/layout 发布、查询，尚未按设备 HWID 划分发布通道或提前过滤下载。HWID 精确匹配在设备 fwctl 和 U-Boot 的安装、恢复校验中执行，不能将详情页展示视为服务端已经具备按 HWID 定向分发能力。
+服务端按完整 HWID 独立发布。每个通道同时只有一个当前版本，发布到一个 HWID 不改变其他通道。固件可以声明多个 HWID，但 release、kernel、rootfs 三份 FIT 必须共同支持声明的全部硬件；发布时选择其中一个目标。
+
+```sh
+ota-cli --server http://127.0.0.1:8090 upload firmware.tar.gz
+ota-cli --server http://127.0.0.1:8090 publish draft-XXXXXX --hwid 1010001000110000
+```
+
+设备使用 `fwctld --hwid HEX16`，启动脚本从 `fwctl hwid value` 获取该值。查询路径为 `/latest/HEX16`，所有 OTA 下载请求携带 `X-OTA-HWID`；下载其他硬件通道的文件会被拒绝。缓存位于 `<cache>/<HWID>/`，避免切换硬件身份后复用其他通道状态。
+
+网络恢复使用 `/recovery/<HWID>/kernel/<version>/<完整内容ID>/kernel.itb` 或对应 rootfs 路径，继续匹配完整版本、内容 ID 和 rootfs payload SHA256。异常内容在所有使用它的 HWID 通道停止分发，各通道仅回退到自身健康确认过的硬件兼容固件。
+
+API、配置、设备上报和新 FIT 不再携带独立产品或布局身份字段。页面产品信息仅从 HWID 的产品线、项目、型号和 PCB 字段解析。
 
 ## 测试
 

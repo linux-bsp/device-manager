@@ -15,7 +15,7 @@ struct http_request {
     unsigned long long length;
     bool head, has_length, admin, expect;
     const char *origin, *host, *type, *device, *authorization, *range;
-    const char *ip, *mac, *hostname, *boot;
+    const char *ip, *mac, *hostname, *boot, *hwid;
 };
 
 /* Returns 0, 400, 431, or -1 for a closed connection. */

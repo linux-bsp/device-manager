@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "ota-common.h"
+#include "dm/hwid-value.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -28,6 +29,14 @@ int ota_identifier(const char *s)
         if (!isalnum((unsigned char)*s) && *s != '-' && *s != '_' && *s != '.')
             return 0;
     return 1;
+}
+
+int ota_hwid_valid(const char *value)
+{
+    unsigned char raw[8]; char canonical[17];
+    if (!value || strlen(value) != 16 || !dm_hwid_parse(value, raw)) return 0;
+    dm_hwid_format(raw, canonical);
+    return !strcmp(value, canonical);
 }
 
 int ota_mkdir(const char *path)
@@ -139,9 +148,9 @@ int ota_read(const char *path, struct release *r)
     int rc = -1;
     if (fstat(fileno(f), &st) || !S_ISREG(st.st_mode) || st.st_size > 2048)
         goto out;
-    if (fscanf(f, "%15s %llu %63s %63s", magic, &r->version, r->product, r->layout) != 4 ||
-        strcmp(magic, "BSPOTA1") || !r->version || r->version > 2147483647 ||
-        !ota_identifier(r->product) || !ota_identifier(r->layout))
+    if (fscanf(f, "%15s %llu %16s", magic, &r->version, r->hwid) != 3 ||
+        strcmp(magic, "BSPOTA2") || !r->version || r->version > 2147483647 ||
+        !ota_hwid_valid(r->hwid))
         goto out;
     for (int i = 0; i < 3; i++) {
         char name[32];
@@ -171,7 +180,7 @@ int ota_write(const char *path, const struct release *r)
         close(fd);
         return -1;
     }
-    int rc = fprintf(f, "BSPOTA1 %llu %s %s\n", r->version, r->product, r->layout) < 0;
+    int rc = fprintf(f, "BSPOTA2 %llu %s\n", r->version, r->hwid) < 0;
     for (int i = 0; i < 3; i++)
         if (fprintf(f, "%s %llu %s\n", ota_files[i], r->size[i], r->hash[i]) < 0)
             rc = 1;

@@ -15,11 +15,12 @@ class InitScript(unittest.TestCase):
         self.bin=self.root/'bin'; self.bin.mkdir()
         self.mac=self.root/'address'; self.mac.write_text('1c:63:49:22:c4:f7\n')
         self.config=self.root/'config'
-        self.config.write_text(f'FWCTLD_ENABLED=1\nFWCTLD_AUTO_INSTALL=1\nFWCTLD_DEVICE_ID=""\nFWCTLD_SERVER=http://example.test:8090\nFWCTLD_PRODUCT=ti-am62x\nFWCTLD_LAYOUT=am62x-sd-ab-v1\nFWCTLD_CACHE={self.root}/cache\nFWCTLD_INTERVAL=15\n')
+        self.config.write_text(f'FWCTLD_ENABLED=1\nFWCTLD_AUTO_INSTALL=1\nFWCTLD_DEVICE_ID=""\nFWCTLD_SERVER=http://example.test:8090\nFWCTLD_CACHE={self.root}/cache\nFWCTLD_INTERVAL=15\n')
         self.calls=self.root/'calls'
-        script=SOURCE.read_text().replace('/etc/default/fwctld',str(self.config)).replace('/data/fwctld.conf',str(self.root/'override')).replace('/sys/class/net/eth0/address',str(self.mac))
+        script=SOURCE.read_text().replace('/etc/default/fwctld',str(self.config)).replace('/data/fwctld.conf',str(self.root/'override')).replace('/sys/class/net/eth0/address',str(self.mac)).replace('/usr/sbin/fwctl ',str(self.bin/'fwctl')+' ')
         self.script=self.root/'init'; self.script.write_text(script)
         for name in ('mkdir',): (self.bin/name).symlink_to(shutil.which(name))
+        hardware=self.bin/'fwctl';hardware.write_text('#!/bin/sh\necho 1010001000110000\n');hardware.chmod(0o755)
         stub=self.bin/'start-stop-daemon'
         stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_CALLS"\n'); stub.chmod(0o755)
         self.env=dict(os.environ,PATH=str(self.bin),TEST_CALLS=str(self.calls))
@@ -104,8 +105,8 @@ class BoardInitScripts(unittest.TestCase):
                     r=subprocess.run([shutil.which('busybox'),'ash',str(script),action],capture_output=True,text=True,env=env)
                     self.assertEqual(r.returncode,0,r.stderr)
                     self.assertEqual('[fwctl] [ERROR]' in r.stderr,code=='1')
-            self.assertEqual(calls.read_text().splitlines(),['--config /test/firmware.conf version']*6)
+            self.assertEqual(calls.read_text().splitlines(),['hwid show','--config /test/firmware.conf version']*6)
             self.assertEqual(subprocess.run([shutil.which('busybox'),'ash',str(script),'stop']).returncode,0)
-            self.assertEqual(len(calls.read_text().splitlines()),6)
+            self.assertEqual(len(calls.read_text().splitlines()),12)
 
 if __name__=='__main__':unittest.main()

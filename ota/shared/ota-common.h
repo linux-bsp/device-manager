@@ -6,7 +6,7 @@
 #define OTA_MAX_FILE (512ULL * 1024 * 1024)
 struct release {
     unsigned long long version;
-    char product[64], layout[64];
+    char hwid[17];
     unsigned long long size[3];
     char hash[3][65];
 };
@@ -24,4 +24,5 @@ int ota_copy(const char *source, const char *dest);
 int ota_run(char *const argv[], char *output, unsigned capacity);
 int ota_publish(int argc, char **argv);
 int ota_identifier(const char *value);
+int ota_hwid_valid(const char *value);
 #endif

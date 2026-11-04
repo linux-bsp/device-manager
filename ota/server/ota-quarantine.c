@@ -12,7 +12,7 @@
 
 struct audit_event {
     long long when;
-    char action[32], kernel[65], rootfs[65];
+    char action[32], kernel[65], rootfs[65], channel[17];
     unsigned long long failed, source, replacement;
     struct ota_report report;
 };
@@ -53,8 +53,8 @@ static int write_event(const char *directory, const char *name, const struct aud
     int fd = mkstemp(temporary); if (fd < 0) return -1;
     FILE *f = fdopen(fd, "w");
     if (!f) { close(fd); unlink(temporary); return -1; }
-    int rc = fprintf(f, "BSPOTAAUDIT1 %lld %s %llu %llu %llu %s %s\n%s", e->when, e->action,
-        e->failed, e->source, e->replacement, e->kernel, e->rootfs, text) < 0 ? -1 : 0;
+    int rc = fprintf(f, "BSPOTAAUDIT2 %lld %s %llu %llu %llu %s %s %s\n%s", e->when, e->action,
+        e->failed, e->source, e->replacement, e->kernel, e->rootfs, e->channel, text) < 0 ? -1 : 0;
     if (fflush(f) || fsync(fd)) rc = -1;
     if (fclose(f)) rc = -1;
     if (!rc && link(temporary, path) && errno != EEXIST) rc = -1;
@@ -67,8 +67,8 @@ static int audit(const char *root, struct audit_event *e, const char *action)
     char directory[OTA_PATH], name[256];
     snprintf(e->action, sizeof(e->action), "%s", action);
     if (ota_path(directory, root, "audit") || ota_mkdir(directory) || ota_sync_dir(root)) return -1;
-    int n = snprintf(name, sizeof(name), "%llu-%s-%s-%s-%s-%llu", e->failed,
-        e->report.device, e->report.boot, e->report.phase, action, e->replacement);
+    int n = snprintf(name, sizeof(name), "%llu-%s-%s-%s-%s-%llu-%s", e->failed,
+        e->report.device, e->report.boot, e->report.phase, action, e->replacement, e->channel);
     if (n < 0 || n >= (int)sizeof(name)) return -1;
     return write_event(directory, name, e);
 }
@@ -86,8 +86,8 @@ static int next_publication(const char *releases, unsigned long long *next)
 static int fallback(const char *root, struct audit_event *e)
 {
     char base[OTA_PATH], source[OTA_PATH], target[OTA_PATH], temporary[OTA_PATH];
-    char path[OTA_PATH], to[OTA_PATH], name[32], latest[OTA_PATH]; struct release release;
-    e->source = ota_history_last_good(root, e->failed, e->report.product, e->report.layout);
+    char path[OTA_PATH], to[OTA_PATH], name[32]; struct release release;
+    e->source = ota_history_last_good(root, e->failed, e->channel);
     if (!e->source) return audit(root, e, "no-confirmed-fallback");
     snprintf(name, sizeof(name), "%llu", e->source);
     if (ota_path(base, root, "releases") || ota_path(source, base, name) ||
@@ -101,40 +101,61 @@ static int fallback(const char *root, struct audit_event *e)
     snprintf(name, sizeof(name), "%llu", e->replacement);
     if (ota_path(path, temporary, "manifest") || ota_write(path, &release) || ota_sync_dir(temporary) ||
         ota_path(target, base, name) || rename(temporary, target) || ota_sync_dir(base) ||
-        ota_path(latest, root, "latest") || ota_path(to, root, ".fallback-latest") ||
-        ota_write(to, &release) || rename(to, latest) || ota_sync_dir(root)) return -1;
+        ota_channel_set(root, &release)) return -1;
     return audit(root, e, "fallback-published");
 }
 int ota_quarantine_report(const char *root, const struct ota_report *report)
 {
     if (!ota_report_incident(report)) return 0;
     char relative[64], directory[OTA_PATH], manifest[OTA_PATH], key[130];
-    char base[OTA_PATH], latest[OTA_PATH], saved[OTA_PATH]; struct release release;
+    char base[OTA_PATH], channels_path[OTA_PATH], saved[OTA_PATH]; struct release release;
     struct audit_event e = {.when = (long long)time(NULL), .failed = report->publication, .report = *report};
+    strcpy(e.channel, report->hwid);
     snprintf(relative, sizeof(relative), "releases/%llu", report->publication);
     if (ota_path(directory, root, relative) || ota_path(manifest, directory, "manifest")) return -1;
     if (access(manifest, F_OK)) return errno == ENOENT ? 0 : -1;
-    if (ota_read(manifest, &release) || strcmp(release.product, report->product) || strcmp(release.layout, report->layout)) return -1;
+    if (ota_read(manifest, &release) || strcmp(release.hwid, report->hwid)) return -1;
     unsigned long version;
-    if (ota_fit_version(directory, &version) || version != report->version ||
-        identity_key(directory, key, e.kernel, e.rootfs)) return -1;
+    if (ota_fit_version(directory, &version) || version != report->version || identity_key(directory, key, e.kernel, e.rootfs)) return -1;
     int lock = ota_lock(root); if (lock < 0) return -1;
-    int rc = -1;
+    int rc = -1; DIR *channels = NULL;
     if (ota_path(base, root, "quarantine") || ota_mkdir(base) || ota_sync_dir(root)) goto done;
     strcpy(e.action, "quarantined");
-    if (write_event(base, key, &e) || audit(root, &e, "quarantined") || ota_path(latest, root, "latest")) goto done;
-    if (!access(latest, F_OK)) {
-        struct release active; char active_key[130], kernel[65], rootfs[65];
-        if (ota_read(latest, &active)) goto done;
+    if (write_event(base, key, &e) || audit(root, &e, "quarantined") || ota_path(channels_path, root, "channels")) goto done;
+    channels = opendir(channels_path);
+    if (!channels) { rc = errno == ENOENT ? 0 : -1; goto done; }
+    struct dirent *entry;
+    while ((entry = readdir(channels))) {
+        if (!ota_hwid_valid(entry->d_name)) continue;
+        struct release active; char active_key[130], kernel[65], rootfs[65], channel_path[OTA_PATH];
+        if (ota_channel_read(root, entry->d_name, &active)) goto done;
         snprintf(relative, sizeof(relative), "releases/%llu", active.version);
         if (ota_path(directory, root, relative) || identity_key(directory, active_key, kernel, rootfs)) goto done;
-        if (strcmp(key, active_key)) { rc = 0; goto done; } /* Never replace a different current release. */
-        snprintf(relative, sizeof(relative), "withdrawn-%llu", active.version);
-        if (audit(root, &e, "distribution-stopped") || ota_path(saved, base, relative) ||
-            rename(latest, saved) || ota_sync_dir(root) || ota_sync_dir(base)) goto done;
-    } else if (errno != ENOENT) goto done;
-    rc = fallback(root, &e);
+        if (strcmp(key, active_key)) continue;
+        strcpy(e.channel, active.hwid); e.failed = active.version; e.source = 0; e.replacement = 0;
+        snprintf(relative, sizeof(relative), "withdrawn-%s-%llu", active.hwid, active.version);
+        if (audit(root, &e, "distribution-stopped") || ota_channel_path(root, active.hwid, channel_path) ||
+            ota_path(saved, base, relative) || rename(channel_path, saved) || ota_sync_dir(channels_path) || ota_sync_dir(base) || fallback(root, &e)) goto done;
+    }
+    /* A power loss after withdrawal must resume its recorded fallback. */
+    DIR *withdrawn = opendir(base);
+    if (!withdrawn) goto done;
+    int journal_error = 0;
+    while ((entry = readdir(withdrawn))) {
+        if (strncmp(entry->d_name, "withdrawn-", 10)) continue;
+        struct release stopped; char path[OTA_PATH], channel[OTA_PATH];
+        if (ota_path(path, base, entry->d_name) || ota_read(path, &stopped) ||
+            ota_channel_path(root, stopped.hwid, channel)) { journal_error = 1; break; }
+        if (!access(channel, F_OK)) continue;
+        if (errno != ENOENT) { journal_error = 1; break; }
+        if (strcmp(stopped.hash[1], release.hash[1]) || strcmp(stopped.hash[2], release.hash[2])) continue;
+        strcpy(e.channel, stopped.hwid); e.failed = stopped.version; e.source = 0; e.replacement = 0;
+        if (fallback(root, &e)) { journal_error = 1; break; }
+    }
+    closedir(withdrawn);
+    rc = journal_error ? -1 : 0;
 done:
+    if (channels) closedir(channels);
     close(lock); return rc;
 }
 int ota_quarantine_json(const char *root, void *stream)
@@ -152,14 +173,14 @@ int ota_quarantine_json(const char *root, void *stream)
         FILE *f = fdopen(fd, "r"); if (!f) { close(fd); rc = -1; break; }
         char line[512], text[OTA_REPORT_SIZE], extra; struct audit_event e;
         int bad = !fgets(line, sizeof(line), f) || !fgets(text, sizeof(text), f) ||
-            sscanf(line, "BSPOTAAUDIT1 %lld %31s %llu %llu %llu %64s %64s %c", &e.when, e.action,
-                &e.failed, &e.source, &e.replacement, e.kernel, e.rootfs, &extra) != 7 ||
+            sscanf(line, "BSPOTAAUDIT2 %lld %31s %llu %llu %llu %64s %64s %16s %c", &e.when, e.action,
+                &e.failed, &e.source, &e.replacement, e.kernel, e.rootfs, e.channel, &extra) != 8 || !ota_hwid_valid(e.channel) ||
             !ota_identifier(e.action) || strlen(e.kernel) != 64 || strlen(e.rootfs) != 64 ||
             strspn(e.kernel, "0123456789abcdef") != 64 || strspn(e.rootfs, "0123456789abcdef") != 64 || ota_report_parse(text, &e.report);
         fclose(f); if (bad) { rc = -1; break; }
         fprintf(out, "%s{\"timestamp\":%lld,\"action\":\"%s\",\"publication\":%llu,\"source_publication\":%llu,\"replacement_publication\":%llu,"
-            "\"device\":\"%s\",\"boot\":\"%s\",\"version\":%u,\"category\":\"%s\",\"reason\":\"%s\",\"kernel_sha256\":\"%s\",\"rootfs_sha256\":\"%s\"}",
-            count++ ? "," : "", e.when, e.action, e.failed, e.source, e.replacement, e.report.device, e.report.boot,
+            "\"hwid\":\"%s\",\"device\":\"%s\",\"boot\":\"%s\",\"version\":%u,\"category\":\"%s\",\"reason\":\"%s\",\"kernel_sha256\":\"%s\",\"rootfs_sha256\":\"%s\"}",
+            count++ ? "," : "", e.when, e.action, e.failed, e.source, e.replacement, e.channel, e.report.device, e.report.boot,
             e.report.version, ota_report_category(&e.report), e.report.reason[0] ? e.report.reason : "not-reported", e.kernel, e.rootfs);
     }
     closedir(dir); return rc || ferror(out) ? -1 : 0;

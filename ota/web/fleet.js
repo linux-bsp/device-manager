@@ -58,7 +58,8 @@ function renderDeviceDetail(device, data) {
   head.className = 'device-id';
   const dl = document.createElement('dl'); panel.append(dl);
   const values = [
-    ['产品 / 布局', (device.product || '未知') + ' / ' + (device.layout || '未知')],
+    ['产品信息', FirmwareHardware.product(device.hwid)],
+    ['HWID',device.hwid||'未知'],
     ['固件版本', device.release?.tag || '未知'],
     ['固件 ID', device.release?.firmware_id || '未知'],
     ['IP 地址', device.network?.ip || '未上报'],
@@ -102,9 +103,9 @@ function renderFleet(data) {
   const current=(data.releases||[]).find(r=>r.publication===data.latest);
   $('dashboard-version').textContent=current?.tag||'尚未发布固件';
   $('dashboard-release-meta').textContent=current?
-    `${current.product} · ${current.layout} · ID ${(current.firmware_id||'').slice(0,8)} · ${fleetTime(current.created)}`:
+    `${FirmwareHardware.product(current.hwid)} · HWID ${current.hwid} · ID ${(current.firmware_id||'').slice(0,8)} · ${fleetTime(current.created)}`:
     '上传并发布固件后，设备才能获取更新。';
-  $('dashboard-publication-status').textContent=current?'发布中':'无发布';
+  $('dashboard-publication-status').textContent=current?`${(data.channels||[]).length} 个 HWID 通道`:'无发布';
   $('dashboard-publication-status').className='pill '+(current?'good':'warn');
   const activity=$('dashboard-activity');activity.replaceChildren();
   const recent=[...(data.device_history||[])].sort((a,b)=>b.updated-a.updated).slice(0,4);
@@ -120,7 +121,7 @@ function renderFleet(data) {
   const overview=$('dashboard-devices');overview.replaceChildren();
   for(const item of devices.slice(0,5)){
     const row=document.createElement('tr');overview.append(row);
-    fleetText(row,'td',item.device,'device-id');fleetText(row,'td',item.product||'未知');
+    fleetText(row,'td',item.device,'device-id');fleetText(row,'td',FirmwareHardware.product(item.hwid));
     fleetPill(fleetText(row,'td',''),fleetPhase(item.phase),fleetTone(item.phase));
     fleetText(row,'td',(item.release?.tag||'未知')+' / '+(item.release?.firmware_id||'').slice(0,8));
     fleetText(row,'td',fleetTime(item.seen));
@@ -137,7 +138,7 @@ function renderFleet(data) {
     fleetText(row,'td',item.device,'device-id');
     const network=fleetText(row,'td',item.network?.ip||'未上报');
     if(item.network?.hostname)fleetText(network,'small',item.network.hostname);
-    fleetText(row,'td',(item.product||'未知')+' / '+(item.layout||'未知'));
+    fleetText(row,'td',FirmwareHardware.product(item.hwid));
     const firmware=fleetText(row,'td',(item.release?.tag||'未知')+' / '+(item.release?.firmware_id||'').slice(0,8));
     firmware.title=item.release?.firmware_id||'';
     fleetPill(fleetText(row,'td',''),fleetPhase(item.phase),fleetTone(item.phase));

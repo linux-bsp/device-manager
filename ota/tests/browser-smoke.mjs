@@ -62,16 +62,16 @@ try {
     }
     await rpc('Runtime.enable');await rpc('Page.enable');
     await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:1000,deviceScaleFactor:1,mobile:false});
-    const seeded=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1'},
-        body:'BSPOTASTATE1 browser-test ti-am62x am62x-sd-ab-v1 1 65537 test-boot success 1 65537\n'});
+    const seeded=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1','X-OTA-HWID':'1010001000110000'},
+        body:'BSPOTASTATE3 browser-test 1010001000110000 1 65537 test-boot success 1 65537 not-reported\n'});
     assert.equal(seeded.status,200,'Device report should be persisted');
     for (const phase of ['installing','install-failed']) {
-        const r=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1'},
-            body:`BSPOTASTATE1 browser-test ti-am62x am62x-sd-ab-v1 2 65538 next-boot ${phase} 0 65537\n`});
+        const r=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1','X-OTA-HWID':'1010001000110000'},
+            body:`BSPOTASTATE3 browser-test 1010001000110000 2 65538 next-boot ${phase} 0 65537 not-reported\n`});
         assert.equal(r.status,200);
     }
     await rpc('Page.navigate',{url});
-    await until(()=>evaluate("document.querySelector('#service-health')?.textContent === '管理服务已连接' && !!document.querySelector('#firmware')"),'page state');
+    await until(()=>evaluate("document.querySelector('#service-health')?.textContent === '管理服务已连接' && document.querySelector('#metric-devices')?.textContent==='1' && document.querySelector('#metric-success')?.textContent==='1' && !!document.querySelector('#firmware')"),'page state');
     assert(await evaluate("!document.querySelector('#dashboard-panel').hidden && document.querySelector('#metric-devices').textContent==='1' && document.querySelector('#metric-success').textContent==='1'"),'Dashboard summary');
     await screenshot('dashboard-desktop.png');
     await evaluate("document.querySelector('#module-devices').click()");
@@ -108,7 +108,7 @@ try {
     }
     await screenshot('uploaded-desktop.png');
     await evaluate(`document.querySelector('[data-publish="${draft.id}"]').click()`);
-    await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('已发布 #')"),'publish button');
+    await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('已发布到 HWID ')"),'publish button');
     await until(async()=>{
         const state=await (await fetch(url+'/api/state')).json();
         return state.latest>before.latest;
@@ -151,7 +151,7 @@ try {
     assert.deepEqual(await evaluate("[...document.querySelectorAll('#drafts-table th')].map(x=>x.textContent)"),['产品','固件版本','固件ID','大小','操作','详情']);
     await evaluate("document.querySelector('#tab-manage').click()");
     assert(await evaluate("!document.querySelector('#overview a.download')"),'Download only in details');
-    for(const table of ['drafts','releases'])assert(await evaluate(`document.querySelector('#${table} .publishing').disabled && document.querySelector('#${table} .publishing').textContent==='当前发布版本' && getComputedStyle(document.querySelector('#${table} .publishing')).backgroundColor==='rgb(229, 231, 235)'`),'Grey current release button');
+    for(const table of ['drafts','releases'])assert(await evaluate(`document.querySelector('#${table} .publishing').disabled && document.querySelector('#${table} .publishing').textContent==='当前发布版本' && getComputedStyle(document.querySelector('#${table} .publishing')).backgroundColor==='rgb(220, 252, 231)'`),'Green current release button');
     await screenshot('published-desktop.png');
     await rpc('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await pause(150);
@@ -163,7 +163,8 @@ try {
     await rpc('Page.navigate',{url:url+'/firmware?kind=release&id='+after.latest+'&tab=releases'});
     await until(()=>evaluate("document.querySelector('#firmware-detail')?.textContent.includes('设备下载次数')"),'firmware detail');
     const detail=await evaluate("document.querySelector('#firmware-detail').textContent");
-    for(const field of ['上传时间','版本号','更新成功次数','更新失败次数','是否有效',expectedTag,draft.firmware_id]) assert(detail.includes(field),field);
+    for(const field of ['适用 HWID','1010001000110000','项目 0001','PCB v1.0','上传时间','版本号','更新成功次数','更新失败次数','是否有效',expectedTag,draft.firmware_id]) assert(detail.includes(field),field);
+    assert(await evaluate("!document.querySelector('#firmware-detail').textContent.includes('产品 / 布局')"));
     assert(await evaluate("document.querySelector('#overview').hidden"));
     assert(await evaluate("document.querySelector('#firmware-detail a.download').href.includes('/api/download/release/')"));
     assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),'Detail page overflows');
@@ -172,12 +173,12 @@ try {
     await screenshot('firmware-detail-desktop.png');
     assert(await evaluate("document.querySelector('#firmware-detail a').getAttribute('href')==='/#releases'"),'Return to original tab');
     // Use real HTTP headers, persist context and show it in upgrade history.
-    const contextHeaders={'X-OTA-Request':'1','X-OTA-Device':'network-audit','X-OTA-IP':'192.0.2.99','X-OTA-MAC':'02:00:00:00:00:99','X-OTA-Hostname':'am625-audit','X-OTA-Boot':'network-boot'};
-    const failure=await fetch(url+'/api/devices/network-audit',{method:'POST',headers:contextHeaders,body:`BSPOTASTATE2 network-audit ti-am62x am62x-sd-ab-v1 ${after.latest} 1 network-boot install-failed 1 1 simulated-failure\n`});
+    const contextHeaders={'X-OTA-HWID':'1010001000110000','X-OTA-Request':'1','X-OTA-Device':'network-audit','X-OTA-IP':'192.0.2.99','X-OTA-MAC':'02:00:00:00:00:99','X-OTA-Hostname':'am625-audit','X-OTA-Boot':'network-boot'};
+    const failure=await fetch(url+'/api/devices/network-audit',{method:'POST',headers:contextHeaders,body:`BSPOTASTATE3 network-audit 1010001000110000 ${after.latest} 1 network-boot install-failed 1 1 simulated-failure\n`});
     assert.equal(failure.status,200);
     await rpc('Page.navigate',{url:url+'/#manage'});
     await until(()=>evaluate("!!document.querySelector('#drafts .invalid')"),'quarantined button');
-    assert(await evaluate("document.querySelector('#drafts .invalid').disabled && getComputedStyle(document.querySelector('#drafts .invalid')).backgroundColor==='rgb(180, 35, 24)'"));
+    assert(await evaluate("document.querySelector('#drafts .invalid').disabled && getComputedStyle(document.querySelector('#drafts .invalid')).backgroundColor==='rgb(229, 231, 235)'"));
     await screenshot('invalid-firmware.png');
     for(const term of ['192.0.2.99','02:00:00:00:00:99','am625-audit']){
         await search('history',term);

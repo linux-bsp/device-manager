@@ -160,6 +160,8 @@ int http_read_request(int client, struct http_request *request)
             if (set_once(&request->type, value)) return 400;
         } else if (!strcasecmp(line, "X-OTA-Device")) {
             if (set_once(&request->device, value)) return 400;
+        } else if (!strcasecmp(line, "X-OTA-HWID")) {
+            if (set_once(&request->hwid, value)) return 400;
         } else if (!strcasecmp(line, "X-OTA-IP")) {
             if (set_once(&request->ip, value)) return 400;
         } else if (!strcasecmp(line, "X-OTA-MAC")) {

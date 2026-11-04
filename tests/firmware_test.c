@@ -138,7 +138,7 @@ static void check_actual_image(void)
     assert(!ftruncate(fd, FW_REGION_COUNT * 65536));
     FILE *config = fdopen(config_fd, "w");
     assert(config);
-    fprintf(config, "device=%s\nproduct=test\nlayout-id=test-v1\n", device_path);
+    fprintf(config, "device=%s\n", device_path);
     fw_layout_defaults(&layout);
     for (unsigned i = 0; i < FW_REGION_COUNT; i++)
         fprintf(config, "%s-offset=%u\n%s-size=65536\n", layout.region[i].name,
@@ -194,9 +194,9 @@ int main(void)
     assert(fd >= 0);
     config = fdopen(fd, "w");
     assert(config);
-    fprintf(config, "device=/tmp/edk-test-device\nproduct=test\nlayout-id=test-v1\n");
+    fprintf(config, "device=/tmp/edk-test-device\n");
     fw_layout_defaults(&layout);
-    assert(!layout.device[0] && !layout.product[0]); /* no board defaults */
+    assert(!layout.device[0]); /* no board defaults */
     for (unsigned int i = 0; i < FW_REGION_COUNT; ++i)
         fprintf(config, "%s-offset=%u\n%s-size=4096\n", layout.region[i].name,
             i * FW_METADATA_SIZE, layout.region[i].name);

@@ -129,7 +129,7 @@ static int download(const char *url, const char *path, unsigned long long limit,
 }
 
 /* Return 1 when installed version and payload hashes already match. */
-static int poll_release(const char *server, const char *cache, const char *product, const char *layout,
+static int poll_release(const char *server, const char *cache, const char *hwid,
                         int auto_install, int force, const char *device)
 {
     static unsigned long long last_blocked;
@@ -140,7 +140,8 @@ static int poll_release(const char *server, const char *cache, const char *produ
     int rc = -1, unchanged = 0;
     if (ota_path(temp, cache, ".download-XXXXXX") || !mkdtemp(temp))
         return -1;
-    if (ota_path(path, temp, "manifest") || ota_path(url, server, "latest")) goto done;
+    char channel[64]; snprintf(channel, sizeof(channel), "latest/%s", hwid);
+    if (ota_path(path, temp, "manifest") || ota_path(url, server, channel)) goto done;
     int fetched = download(url, path, 2048, NULL, 0, 1, device);
     if (fetched == 1) {
         if (!waiting) fwctld_log("No active OTA publication; waiting");
@@ -151,8 +152,8 @@ static int poll_release(const char *server, const char *cache, const char *produ
         fwctld_error("Cannot fetch a valid publication manifest; check network/server");
         goto done;
     }
-    if (strcmp(r.product, product) || strcmp(r.layout, layout)) {
-        fwctld_error("OTA product/layout mismatch\n");
+    if (strcmp(r.hwid, hwid)) {
+        fwctld_error("OTA HWID mismatch\n");
         goto done;
     }
     if (fwctld_release_label(server, r.version, label)) { fwctld_error("Cannot fetch firmware tag/content identity"); goto done; }
@@ -179,8 +180,8 @@ static int poll_release(const char *server, const char *cache, const char *produ
             fwctld_error("Invalid local current record; inspect cache\n");
             goto done;
         }
-        if (strcmp(old.product, product) || strcmp(old.layout, layout)) {
-            fwctld_error("Cache belongs to a different product/layout\n");
+        if (strcmp(old.hwid, hwid)) {
+            fwctld_error("Cache belongs to a different HWID\n");
             goto done;
         }
         if (r.version < old.version) {
@@ -230,7 +231,7 @@ static int poll_release(const char *server, const char *cache, const char *produ
             if (ota_path(url, server, relative) || ota_path(path, stage, ota_files[i]) ||
                 download(url, path, r.size[i], r.hash[i], 1, 0, device)) {
                 fwctld_error("Download failed: %s, firmware %s", ota_files[i], label);
-                if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "device-error", "download-failed");
+                if (auto_install) (void)fwctld_report_problem(server, device, hwid, r.version, "device-error", "download-failed");
                 goto done;
             }
             fwctld_log("Download complete: %s", ota_files[i]);
@@ -238,13 +239,13 @@ static int poll_release(const char *server, const char *cache, const char *produ
         fwctld_log("Verifying SHA256 for firmware %s", label);
         if (ota_verify(stage, &r)) {
             fwctld_error("Staged download does not match the release manifest");
-            if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "verify-failed", "download-sha256-mismatch");
+            if (auto_install) (void)fwctld_report_problem(server, device, hwid, r.version, "verify-failed", "download-sha256-mismatch");
             goto done;
         }
         if (ota_path(path, stage, "manifest")) goto done;
         (void)unlink(path);
         if (ota_write(path, &r) || ota_sync_dir(stage) || rename(stage, dest) || ota_sync_dir(cache)) {
-            if (auto_install) (void)fwctld_report_problem(server, device, product, layout, r.version, "device-error", "cache-storage-failed");
+            if (auto_install) (void)fwctld_report_problem(server, device, hwid, r.version, "device-error", "cache-storage-failed");
             goto done;
         }
         fwctld_log("Downloaded and SHA256-verified firmware %s", label);
@@ -274,7 +275,7 @@ done:
 
 int main(int argc, char **argv)
 {
-    const char *server = NULL, *cache_arg = NULL, *product = NULL, *layout = NULL;
+    const char *server = NULL, *cache_arg = NULL, *hwid = NULL;
     unsigned long interval = 60;
     int once = 0, auto_install = 0, force = 0;
     const char *device = NULL, *console = NULL, *interface = NULL;
@@ -300,10 +301,8 @@ int main(int argc, char **argv)
             server = argv[++i];
         else if (!strcmp(argv[i], "--cache"))
             cache_arg = argv[++i];
-        else if (!strcmp(argv[i], "--product"))
-            product = argv[++i];
-        else if (!strcmp(argv[i], "--layout"))
-            layout = argv[++i];
+        else if (!strcmp(argv[i], "--hwid"))
+            hwid = argv[++i];
         else if (!strcmp(argv[i], "--interval")) {
             char *end;
             errno = 0;
@@ -315,17 +314,16 @@ int main(int argc, char **argv)
     }
     if (device && !ota_identifier(device)) goto usage;
     if (interface && (!*interface || strlen(interface) >= IF_NAMESIZE)) goto usage;
-    if ((force && (!once || !auto_install)) || (auto_install && (!device || !ota_identifier(device))) || !server || !cache_arg || !product || !layout || !ota_identifier(product) ||
-        !ota_identifier(layout) || (strncmp(server, "http://", 7) && strncmp(server, "https://", 8)) ||
+    if ((force && (!once || !auto_install)) || (auto_install && (!device || !ota_identifier(device))) || !server || !cache_arg || !ota_hwid_valid(hwid) || (strncmp(server, "http://", 7) && strncmp(server, "https://", 8)) ||
         strchr(server, '?') || strchr(server, '#') || strlen(server) > 3000)
         goto usage;
     fwctld_log_init(console);
-    char base[OTA_PATH], cache[OTA_PATH];
+    char base[OTA_PATH], cache[OTA_PATH], cache_base[OTA_PATH];
     strcpy(base, server);
     size_t length = strlen(base);
     while (length && base[length - 1] == '/')
         base[--length] = 0;
-    if (ota_mkdir(cache_arg) || !realpath(cache_arg, cache)) {
+    if (ota_mkdir(cache_arg) || !realpath(cache_arg, cache_base) || ota_path(cache, cache_base, hwid) || ota_mkdir(cache)) {
         perror("OTA cache (create its parent first)");
         return 1;
     }
@@ -350,14 +348,15 @@ int main(int argc, char **argv)
         }
         waiting_for_network = 0;
         fwctld_network_context(interface, device);
+        fwctld_hardware_context(hwid);
         const char *stage = "transaction reconciliation";
-        rc = auto_install ? fwctld_auto_reconcile(base, device, product, layout) : 0;
+        rc = auto_install ? fwctld_auto_reconcile(base, device, hwid) : 0;
         if (!rc) {
             stage = "publication query/download";
-            rc = poll_release(base, cache, product, layout, auto_install, force, device);
+            rc = poll_release(base, cache, hwid, auto_install, force, device);
             if (!rc && auto_install) {
                 stage = "installation/result reporting";
-                rc = fwctld_auto_install(base, cache, device, product, layout);
+                rc = fwctld_auto_install(base, cache, device, hwid);
             }
         }
         if (rc > 0) rc = 0;
@@ -376,7 +375,7 @@ wait_for_next_check:
     close(lock);
     return ota_stop ? 0 : (rc ? 1 : 0);
 usage:
-    fwctld_log("Usage: fwctld --server URL --cache DIR --product ID --layout ID "
+    fwctld_log("Usage: fwctld --server URL --cache DIR --hwid HEX16 "
             "[--console PATH] [--interface IFACE] [--interval SECONDS] [--once] [--auto-install --device ID] [--force (requires --once --auto-install)]\n");
     return 1;
 }

@@ -33,9 +33,9 @@ static int database(const char *root)
         "CREATE INDEX IF NOT EXISTS downloads_publication ON firmware_downloads(publication);"
         "CREATE TABLE IF NOT EXISTS device_requests (id INTEGER PRIMARY KEY,device TEXT NOT NULL,"
         "publication INTEGER NOT NULL,transaction_boot TEXT NOT NULL,request_boot TEXT NOT NULL,phase TEXT NOT NULL,"
-        "ip TEXT NOT NULL,mac TEXT NOT NULL,hostname TEXT NOT NULL,peer_ip TEXT NOT NULL,"
+        "ip TEXT NOT NULL,mac TEXT NOT NULL,hostname TEXT NOT NULL,peer_ip TEXT NOT NULL,hwid TEXT NOT NULL,"
         "first_seen INTEGER NOT NULL,last_seen INTEGER NOT NULL,requests INTEGER NOT NULL,"
-        "UNIQUE(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip));"
+        "UNIQUE(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip,hwid));"
         "CREATE INDEX IF NOT EXISTS requests_transaction ON device_requests(device,publication,transaction_boot);";
     if (sqlite3_exec(catalog, schema, NULL, NULL, NULL) != SQLITE_OK) goto fail;
     strcpy(catalog_path, path);
@@ -222,17 +222,18 @@ int ota_catalog_request(const char *root, const char *device, unsigned long long
                         const char *transaction, const char *phase, const struct ota_network_context *n)
 {
     if (!n->ip) return 0; /* Historical clients never supplied these facts. */
-    if (!ota_network_valid(n) || !ota_identifier(device) || !ota_identifier(transaction) || !ota_identifier(phase) || database(root)) return -1;
+    if (!ota_network_valid(n) || !ota_hwid_valid(n->hwid) || !ota_identifier(device) || !ota_identifier(transaction) || !ota_identifier(phase) || database(root)) return -1;
     sqlite3_stmt *query = NULL;
-    const char *sql = "INSERT INTO device_requests(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip,first_seen,last_seen,requests) "
-        "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,unixepoch(),unixepoch(),1) "
-        "ON CONFLICT(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip) "
+    const char *sql = "INSERT INTO device_requests(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip,first_seen,last_seen,requests,hwid) "
+        "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,unixepoch(),unixepoch(),1,?10) "
+        "ON CONFLICT(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip,hwid) "
         "DO UPDATE SET last_seen=unixepoch(),requests=requests+1";
     if (sqlite3_prepare_v2(catalog, sql, -1, &query, NULL) != SQLITE_OK) return -1;
     sqlite3_bind_text(query, 1, device, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(query, 2, (sqlite3_int64)publication);
     const char *values[] = {transaction, n->boot, phase, n->ip, n->mac, n->hostname, n->peer_ip};
     for (int i = 0; i < 7; i++) sqlite3_bind_text(query, i + 3, values[i], -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(query, 10, n->hwid, -1, SQLITE_TRANSIENT);
     int result = sqlite3_step(query); sqlite3_finalize(query);
     return result == SQLITE_DONE ? 0 : -1;
 }

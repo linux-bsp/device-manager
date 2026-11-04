@@ -338,21 +338,12 @@ static int component_from_name(const char *name,
 static int verify_identity(const struct fw_layout *layout,
                            const struct fw_fit *fit, const char **type)
 {
-    const char *product;
-    const char *layout_id;
     int ret;
 
     ret = get_string(fit, fit->configuration, "fw,type", type);
-    if (!ret)
-        ret = get_string(fit, fit->configuration, "fw,product", &product);
-    if (!ret)
-        ret = get_string(fit, fit->configuration, "fw,layout-id",
-                         &layout_id);
     if (ret)
         return ret;
-    if (strcmp(product, layout->product) ||
-        strcmp(layout_id, layout->layout_id))
-        return -EPERM;
+    if (!layout->hwid_config[0]) return -ENODATA;
     if (layout->hwid_config[0]) {
         struct dm_hwid_status device;
         ret = dm_hwid_read(layout->hwid_config, &device);

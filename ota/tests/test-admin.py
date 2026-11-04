@@ -46,14 +46,16 @@ class AdminHTTP(unittest.TestCase):
         self.log.close()
         self.tmp.cleanup()
 
-    def fixture(self, version=65537, product='ti-am62x', bad_hash=False):
-        kernel_dts = f'/dts-v1/; / {{ description="kernel"; configurations {{ default="c"; c {{ fw,version=<{version}>; }}; }}; }};'
+    def fixture(self, version=65537, hwid='1010001000110000', bad_hash=False):
+        ids = hwid if isinstance(hwid, list) else [hwid]
+        declaration = 'fw,hwids = ' + ', '.join('"'+value+'"' for value in ids) + ';' if hwid is not None else ''
+        kernel_dts = f'/dts-v1/; / {{ description="kernel"; configurations {{ default="c"; c {{ {declaration} fw,version=<{version}>; }}; }}; }};'
         kernel_fit = subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb'], input=kernel_dts.encode(), capture_output=True, check=True, env=ENV).stdout
         raw = self.root / 'rootfs-payload'
         raw.write_bytes(bytes(range(256)) * 1100)
         root_dts = f'''/dts-v1/; / {{ description="rootfs"; timestamp=<0>; #address-cells=<1>;
 images {{ rootfs {{ description="rootfs"; data=/incbin/("{raw}"); type="firmware"; arch="arm64"; compression="none"; }}; }};
-configurations {{ default="c"; c {{ firmware="rootfs"; }}; }}; }};'''
+configurations {{ default="c"; c {{ {declaration} firmware="rootfs"; }}; }}; }};'''
         root_fit = subprocess.run(['dtc', '-I', 'dts', '-O', 'dtb'], input=root_dts.encode(), capture_output=True, check=True, env=ENV).stdout
         files = {'kernel.itb': kernel_fit, 'rootfs.itb': root_fit}
         kernel = hashlib.sha256(files['kernel.itb']).hexdigest()
@@ -63,7 +65,7 @@ configurations {{ default="c"; c {{ firmware="rootfs"; }}; }}; }};'''
         dts = f'''/dts-v1/;
 / {{ configurations {{ default = "conf-1";
 conf-1 {{ fw,type = "release"; fw,version = <{version}>;
-fw,product = "{product}"; fw,layout-id = "am62x-sd-ab-v1";
+{declaration}
 fw,components = "kernel", "rootfs";
 fw,kernel-file = "kernel.itb"; fw,rootfs-file = "rootfs.itb";
 fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
@@ -89,7 +91,7 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
 
     def request(self, method, path, body=None, headers=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=15)
-        connection.request(method, path, body=body, headers=headers or {})
+        connection.request(method, path, body=body, headers={'X-OTA-HWID':'1010001000110000', **(headers or {})})
         result = connection.getresponse()
         data = result.read()
         status = result.status
@@ -106,8 +108,8 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         self.assertEqual(status, 200, body)
         return json.loads(body)
 
-    def publish(self, ident):
-        return self.request('POST', '/api/publish/' + ident, headers={'X-OTA-Request': '1'})
+    def publish(self, ident, hwid="1010001000110000"):
+        return self.request('POST', '/api/publish/' + ident + '/' + hwid, headers={'X-OTA-Request': '1'})
 
     def draft(self, archive=None):
         status, body = self.upload(archive)
@@ -136,7 +138,7 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         self.assertEqual(state['latest'], 0)
         self.assertEqual(state['drafts'][0]['firmware_version'], '1.0.1')
         self.assertEqual(state['drafts'][0]['publication'], 0)
-        self.assertEqual(self.request('GET', '/latest')[0], 404)
+        self.assertEqual(self.request('GET', '/latest/1010001000110000')[0], 204)
         self.assertEqual(self.request('GET', '/drafts/' + ident + '/release.itb')[0], 404)
         status, body = self.publish(ident)
         self.assertEqual(status, 200, body)
@@ -150,10 +152,9 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         for name, content in self.files.items():
             self.assertEqual(self.request('GET', '/releases/1/' + name), (200, content))
         subprocess.run([str(SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
-                        '--cache', str(self.root / 'cache'), '--product', 'ti-am62x',
-                        '--layout', 'am62x-sd-ab-v1', '--once'], env=ENV, check=True, capture_output=True)
+                        '--cache', str(self.root / 'cache'), '--hwid', '1010001000110000', '--once'], env=ENV, check=True, capture_output=True)
         for name, content in self.files.items():
-            self.assertEqual((self.root / 'cache/1' / name).read_bytes(), content)
+            self.assertEqual((self.root / 'cache/1010001000110000/1' / name).read_bytes(), content)
         newer = self.draft(self.bundle(self.fixture(version=65538)))
         self.assertEqual(self.state()['latest'], 1)
         status, body = self.publish(newer)
@@ -219,15 +220,15 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         self.assert_no_partial()
         self.assertEqual(self.request('GET', '/healthz'), (200, b'ok\n'))
 
-    def test_wrong_product_rejected_and_explicit_older_target_published(self):
+    def test_wrong_hwid_rejected_and_explicit_older_target_published(self):
         self.assertEqual(self.publish(self.draft())[0], 200)
-        for archive in [self.bundle(self.fixture(product='imx6ull'))]:
+        for archive in [self.bundle(self.fixture(hwid='1010002000110000'))]:
             ident = self.draft(archive)
-            self.assertEqual(self.publish(ident)[0], 409)
+            self.assertEqual(self.publish(ident)[0], 422)
             self.assertEqual(self.state()['latest'], 1)
         self.assertEqual(self.publish(self.draft(self.bundle(self.fixture(version=65536))))[0], 200)
         self.assertEqual(self.state()['latest'], 2)
-        self.assertEqual(self.publish('../escape')[0], 404)
+        self.assertEqual(self.publish('../escape')[0], 400)
         self.assertEqual(self.publish('draft-AAAAAA')[0], 404)
 
     def test_page_and_no_download_links(self):

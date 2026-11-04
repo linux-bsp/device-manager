@@ -119,8 +119,7 @@ int fwctld_image_matches(const char *server, unsigned long long publication)
     return -1;
 }
 
-static int read_report(const char *server, const char *device, const char *product,
-                       const char *layout, struct ota_report *r)
+static int read_report(const char *server, const char *device, const char *hwid, struct ota_report *r)
 {
     char relative[128], url[OTA_PATH], text[OTA_REPORT_SIZE];
     snprintf(relative, sizeof(relative), "api/devices/%s", device);
@@ -130,8 +129,8 @@ static int read_report(const char *server, const char *device, const char *produ
     }
     if (!*text) { memset(r, 0, sizeof(*r)); return 0; }
     if (ota_report_parse(text, r) || strcmp(r->device, device) ||
-        strcmp(r->product, product) || strcmp(r->layout, layout)) {
-        fwctld_error("Invalid server transaction or mismatched device/product/layout");
+        strcmp(r->hwid, hwid)) {
+        fwctld_error("Invalid server transaction or mismatched device/HWID");
         return -1;
     }
     return 0;
@@ -192,12 +191,12 @@ static int reboot_device(const char *server, struct ota_report *r, const struct 
 }
 
 /* Returns 1 while an update/boot test blocks new installation, 0 when idle. */
-int fwctld_auto_reconcile(const char *server, const char *device, const char *product, const char *layout)
+int fwctld_auto_reconcile(const char *server, const char *device, const char *hwid)
 {
     struct ota_report r;
     struct fw_snapshot s;
     char boot[64] = "", tag[32], expected_id[65];
-    if (read_report(server, device, product, layout, &r) || snapshot(&s) || boot_id(boot)) return -1;
+    if (read_report(server, device, hwid, &r) || snapshot(&s) || boot_id(boot)) return -1;
     if (!r.publication) return s.pending != 255 || !s.good[s.booted] ? 1 : 0;
     int in_progress = !strcmp(r.phase, "installing") || !strcmp(r.phase, "rebooting") ||
                       !strcmp(r.phase, "boot-testing");
@@ -225,7 +224,7 @@ int fwctld_auto_reconcile(const char *server, const char *device, const char *pr
 }
 
 int fwctld_auto_install(const char *server, const char *cache, const char *device,
-                     const char *product, const char *layout)
+                     const char *hwid)
 {
     struct fw_snapshot s;
     struct ota_report old, r = {0};
@@ -234,7 +233,7 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
     char expected_tag[32], expected_id[65];
     unsigned long long publication;
     unsigned version;
-    if (snapshot(&s) || boot_id(boot) || read_report(server, device, product, layout, &old) ||
+    if (snapshot(&s) || boot_id(boot) || read_report(server, device, hwid, &old) ||
         ota_path(path, cache, "current") || ota_read(path, &release)) return -1;
     if (s.pending != 255 || s.active != s.booted || !s.good[s.booted] || s.state[s.booted] != 4)
         return 0;
@@ -243,8 +242,7 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
         sscanf(info, "BSPOTAINFO1 %llu %u %c", &publication, &version, &extra) != 2 ||
         publication != release.version || !version) return -1;
     snprintf(r.device, sizeof(r.device), "%s", device);
-    snprintf(r.product, sizeof(r.product), "%s", product);
-    snprintf(r.layout, sizeof(r.layout), "%s", layout);
+    snprintf(r.hwid, sizeof(r.hwid), "%s", hwid);
     strcpy(r.boot, boot);
     r.publication = publication; r.version = version; r.target = 1 - s.booted;
     unsigned floor = s.version[s.booted];
@@ -274,8 +272,7 @@ int fwctld_auto_install(const char *server, const char *cache, const char *devic
     return reboot_device(server, &r, &s) < 0 ? -1 : 0;
 }
 
-int fwctld_report_problem(const char *server, const char *device, const char *product,
-                         const char *layout, unsigned long long publication,
+int fwctld_report_problem(const char *server, const char *device, const char *hwid, unsigned long long publication,
                          const char *phase, const char *reason)
 {
     struct ota_report r = {0}; struct fw_snapshot s = {0};
@@ -286,8 +283,7 @@ int fwctld_report_problem(const char *server, const char *device, const char *pr
         number != publication || boot_id(r.boot)) return -1;
     (void)snapshot(&s);
     snprintf(r.device, sizeof(r.device), "%s", device);
-    snprintf(r.product, sizeof(r.product), "%s", product);
-    snprintf(r.layout, sizeof(r.layout), "%s", layout);
+    snprintf(r.hwid, sizeof(r.hwid), "%s", hwid);
     snprintf(r.phase, sizeof(r.phase), "%s", phase);
     snprintf(r.reason, sizeof(r.reason), "%s", reason);
     r.publication = publication; r.target = 1 - s.booted;

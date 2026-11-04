@@ -26,7 +26,7 @@ struct identity {
     char root[65], salt[65], payload[65], firmware_id[65];
 };
 struct settings {
-    char server[256], product[64], layout[64], interface[32], root[2][128];
+    char server[256], hwid[17], interface[32], root[2][128];
 };
 struct alternate_rootfs {
     unsigned deployment, slot, version;
@@ -265,7 +265,7 @@ static int settings_read(struct settings *s)
         *value++ = 0;
         char *out = NULL; size_t size = 0;
 #define SETTING(k, member) if (!strcmp(line, k)) { out=s->member; size=sizeof(s->member); }
-        SETTING("server", server) else SETTING("product", product) else SETTING("layout", layout)
+        SETTING("server", server)
         else SETTING("interface", interface) else SETTING("root-a", root[0]) else SETTING("root-b", root[1])
 #undef SETTING
         if (!out || strlen(value) >= size || out[0]) { fclose(file); return -1; }
@@ -274,10 +274,6 @@ static int settings_read(struct settings *s)
     int rc = ferror(file); fclose(file);
     if (rc || !device_name(s->root[0]) || !device_name(s->root[1]) || !s->interface[0] ||
         strspn(s->interface, "abcdefghijklmnopqrstuvwxyz0123456789-_") != strlen(s->interface)) return -1;
-    for (unsigned i=0; i<2; i++) {
-        const char *id = i ? s->layout : s->product;
-        if (!*id || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") != strlen(id)) return -1;
-    }
     return strncmp(s->server,"http://",7) && strncmp(s->server,"https://",8) ? -1 : 0;
 }
 static void reboot_board(void)
@@ -356,8 +352,8 @@ static void repair_alternate_rootfs(const struct settings *settings,
         *network = 1;
     }
     char url[768], bytes[32], limit[32];
-    snprintf(url, sizeof(url), "%s/recovery/%s/%s/rootfs/%u/%s/%s/rootfs.itb",
-        settings->server, settings->product, settings->layout,
+    snprintf(url, sizeof(url), "%s/recovery/%s/rootfs/%u/%s/%s/rootfs.itb",
+        settings->server, settings->hwid,
         id.version, id.firmware_id, id.payload);
     snprintf(bytes, sizeof(bytes), "%llu", (unsigned long long)id.bytes);
     snprintf(limit, sizeof(limit), "%llu", (unsigned long long)id.bytes + 1024 * 1024);
@@ -460,6 +456,8 @@ int fwctl_recovery_main(int argc, char **argv)
     if (run(hardware_command, hardware, sizeof(hardware)))
         halt_recovery("HWID storage missing, corrupt or inconsistent; no recovery writes attempted");
     hardware[strcspn(hardware, "\r\n")] = 0;
+    if (strlen(hardware) != 16) halt_recovery("invalid hardware identity");
+    memcpy(s.hwid, hardware, 17);
     char hardware_message[192];
     snprintf(hardware_message, sizeof(hardware_message), "stage=initramfs hwid=%s", hardware);
     log_message(hardware_message);
@@ -515,8 +513,8 @@ int fwctl_recovery_main(int argc, char **argv)
         if (!id.firmware_id[0] && firmware_id_read(id.firmware_id))
             halt_recovery("complete version+hash identity unavailable; refusing ambiguous network recovery");
         char url[640], size[32], limit[32];
-        snprintf(url,sizeof(url),"%s/recovery/%s/%s/rootfs/%u/%s/%s/rootfs.itb",
-            s.server,s.product,s.layout,version,id.firmware_id,id.payload);
+        snprintf(url,sizeof(url),"%s/recovery/%s/rootfs/%u/%s/%s/rootfs.itb",
+            s.server,s.hwid,version,id.firmware_id,id.payload);
         snprintf(size,sizeof(size),"%u",id.bytes);
         snprintf(limit,sizeof(limit),"%llu",(unsigned long long)id.bytes + 1024*1024);
         unlink("/tmp/recovery-rootfs.itb");

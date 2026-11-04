@@ -35,6 +35,15 @@ int ota_device_read(const char *root, const char *device, char text[OTA_REPORT_S
     return rc;
 }
 
+int ota_report_targets(const char *root, const struct ota_report *report)
+{
+    char relative[64], directory[OTA_PATH], manifest[OTA_PATH]; struct release release;
+    snprintf(relative, sizeof(relative), "releases/%llu", report->publication);
+    if (ota_path(directory, root, relative) || ota_path(manifest, directory, "manifest")) return 0;
+    if (access(manifest, F_OK)) return errno == ENOENT;
+    return !ota_read(manifest, &release) && !strcmp(release.hwid, report->hwid);
+}
+
 int ota_device_write(const char *root, const struct ota_report *r)
 {
     char dir[OTA_PATH], path[OTA_PATH], temp[OTA_PATH], text[OTA_REPORT_SIZE];
@@ -68,98 +77,51 @@ int ota_devices_json(const char *root, FILE *out)
         struct stat st;
         if (ota_device_read(root, entry->d_name, text) || ota_report_parse(text, &r) ||
             ota_path(path, dir, entry->d_name) || stat(path, &st)) continue;
-        fprintf(out, "%s{\"device\":\"%s\",\"product\":\"%s\",\"layout\":\"%s\","
+        fprintf(out, "%s{\"device\":\"%s\",\"hwid\":\"%s\","
             "\"publication\":%llu,\"version\":%u,\"running\":%u,\"phase\":\"%s\",\"updated\":%lld}",
-            count++ ? "," : "", r.device, r.product, r.layout, r.publication,
+            count++ ? "," : "", r.device, r.hwid, r.publication,
             r.version, r.running, r.phase, (long long)st.st_mtime);
     }
     closedir(d);
     return ferror(out) ? -1 : 0;
 }
 
-/* Recovery is keyed by the complete firmware identity. Version tags are
- * intentionally reusable during development and are not unique selectors. */
-int ota_recovery_path(const char *root, const char *request, char directory[OTA_PATH])
+/* Recovery never substitutes a different HWID, version or content identity. */
+static int recovery_path(const char *root, const char *request, int rootfs, char directory[OTA_PATH])
 {
-    char product[64], layout[64], firmware_id[65], extra, canonical[384], releases[OTA_PATH];
+    char hwid[17], id[65], hash[65] = "", extra, canonical[384], releases[OTA_PATH];
     unsigned version;
-    if (sscanf(request, "/recovery/%63[^/]/%63[^/]/kernel/%u/%64[^/]/kernel.itb%c",
-        product, layout, &version, firmware_id, &extra) != 4 || !version ||
-        !ota_identifier(product) || !ota_identifier(layout)) return -1;
-    if (strlen(firmware_id) != 64 || strspn(firmware_id, "0123456789abcdef") != 64) return -1;
-    snprintf(canonical, sizeof(canonical), "/recovery/%s/%s/kernel/%u/%s/kernel.itb",
-        product, layout, version, firmware_id);
-    if (strcmp(canonical, request) || ota_path(releases, root, "releases")) return -1;
-    DIR *d = opendir(releases);
-    if (!d) return -1;
-    struct dirent *entry;
-    int rc = -1;
-    char selected_hash[65] = "";
-    while ((entry = readdir(d))) {
-        char *end, path[OTA_PATH], manifest[OTA_PATH], fit[OTA_PATH], conf[128], node[256], value[128];
-        unsigned long number = strtoul(entry->d_name, &end, 10);
-        if (!number || *end || number > 2147483647 || ota_path(path, releases, entry->d_name)) continue;
-        struct stat st;
-        if (lstat(path, &st) || !S_ISDIR(st.st_mode)) continue;
-        struct release r;
-        if (ota_path(manifest, path, "manifest") || ota_read(manifest, &r) ||
-            strcmp(product, r.product) || strcmp(layout, r.layout) ||
-            ota_path(fit, path, "kernel.itb")) continue;
-        char *getconf[] = {"fdtget", "-t", "s", fit, "/configurations", "default", NULL};
-        if (ota_run(getconf, conf, sizeof(conf))) continue;
-        conf[strcspn(conf, "\r\n")] = 0;
-        if (!ota_identifier(conf)) continue;
-        snprintf(node, sizeof(node), "/configurations/%s", conf);
-        char *getversion[] = {"fdtget", "-t", "u", fit, node, "fw,version", NULL};
-        if (ota_run(getversion, value, sizeof(value))) continue;
-        value[strcspn(value, "\r\n")] = 0;
-        unsigned long candidate = strtoul(value, &end, 10);
-        if (*end || candidate != version) continue;
-        char image[512], candidate_id[65]; unsigned long candidate_version;
-        if (ota_image_identity(path, number, image, sizeof(image)) ||
-            ota_content_identity(image, candidate_id, &candidate_version) ||
-            candidate_version != version || strcmp(candidate_id, firmware_id)) continue;
-        if (*selected_hash && strcmp(candidate_id, selected_hash)) { rc = -1; break; }
-        strcpy(selected_hash, candidate_id);
-        strcpy(directory, path);
-        rc = 0;
+    if (rootfs) {
+        if (sscanf(request, "/recovery/%16[^/]/rootfs/%u/%64[^/]/%64[^/]/rootfs.itb%c",
+            hwid, &version, id, hash, &extra) != 4) return -1;
+        snprintf(canonical, sizeof(canonical), "/recovery/%s/rootfs/%u/%s/%s/rootfs.itb", hwid, version, id, hash);
+    } else {
+        if (sscanf(request, "/recovery/%16[^/]/kernel/%u/%64[^/]/kernel.itb%c", hwid, &version, id, &extra) != 3) return -1;
+        snprintf(canonical, sizeof(canonical), "/recovery/%s/kernel/%u/%s/kernel.itb", hwid, version, id);
     }
-    closedir(d);
-    return rc;
-}
-
-/* Exact written rootfs payload, including its verity tree; tags and FIT wrapper
- * timestamps do not select recovery content. Never substitute latest. */
-int ota_rootfs_recovery_path(const char *root, const char *request, char directory[OTA_PATH])
-{
-    char product[64], layout[64], firmware_id[65], hash[65], extra, canonical[448], releases[OTA_PATH];
-    unsigned version;
-    if (sscanf(request, "/recovery/%63[^/]/%63[^/]/rootfs/%u/%64[^/]/%64[^/]/rootfs.itb%c",
-        product, layout, &version, firmware_id, hash, &extra) != 5 || !version ||
-        !ota_identifier(product) || !ota_identifier(layout) ||
-        strlen(firmware_id) != 64 || strspn(firmware_id, "0123456789abcdef") != 64 ||
-        strlen(hash) != 64 || strspn(hash, "0123456789abcdef") != 64) return -1;
-    snprintf(canonical, sizeof(canonical), "/recovery/%s/%s/rootfs/%u/%s/%s/rootfs.itb",
-        product, layout, version, firmware_id, hash);
-    if (strcmp(canonical, request) || ota_path(releases, root, "releases")) return -1;
-    DIR *d = opendir(releases);
-    if (!d) return -1;
+    if (!version || !ota_hwid_valid(hwid) || strlen(id) != 64 || strspn(id, "0123456789abcdef") != 64 ||
+        (rootfs && (strlen(hash) != 64 || strspn(hash, "0123456789abcdef") != 64)) ||
+        strcmp(canonical, request) || ota_path(releases, root, "releases")) return -1;
+    DIR *dir = opendir(releases);
+    if (!dir) return -1;
     struct dirent *entry; int rc = -1;
-    while ((entry = readdir(d))) {
-        char *end, path[OTA_PATH], manifest[OTA_PATH], body[512], root_hash[65], kernel_hash[65];
-        unsigned long long n = strtoull(entry->d_name, &end, 10), publication, kernel_size, root_size;
-        unsigned candidate_version; struct release release;
-        if (!n || *end || n > 2147483647 || ota_path(path, releases, entry->d_name) ||
-            ota_path(manifest, path, "manifest") || ota_read(manifest, &release) ||
-            strcmp(release.product, product) || strcmp(release.layout, layout)) continue;
-        struct stat st;
-        if (lstat(path, &st) || !S_ISDIR(st.st_mode) || ota_image_identity(path, n, body, sizeof(body))) continue;
-        char candidate_id[65]; unsigned long identity_version;
-        if (sscanf(body, "BSPOTAIMAGE1 %llu %u %llu %64s %llu %64s %c", &publication, &candidate_version,
-            &kernel_size, kernel_hash, &root_size, root_hash, &extra) != 6 || strcmp(root_hash, hash) ||
-            candidate_version != version || ota_content_identity(body, candidate_id, &identity_version) ||
-            identity_version != version || strcmp(candidate_id, firmware_id)) continue;
+    while ((entry = readdir(dir))) {
+        char *end, path[OTA_PATH], manifest[OTA_PATH];
+        unsigned long long number = strtoull(entry->d_name, &end, 10);
+        if (!number || *end || number > 2147483647 || ota_path(path, releases, entry->d_name) || ota_path(manifest, path, "manifest")) continue;
+        struct release release; struct ota_catalog_identity identity;
+        if (ota_read(manifest, &release) || strcmp(release.hwid, hwid) || ota_catalog_get(root, path, &identity) ||
+            identity.version != version || strcmp(identity.hash, id) || (rootfs && strcmp(identity.rootfs, hash))) continue;
         strcpy(directory, path); rc = 0; break;
     }
-    closedir(d); return rc;
+    closedir(dir);
+    return rc;
+}
+int ota_recovery_path(const char *root, const char *request, char directory[OTA_PATH])
+{
+    return recovery_path(root, request, 0, directory);
+}
+int ota_rootfs_recovery_path(const char *root, const char *request, char directory[OTA_PATH])
+{
+    return recovery_path(root, request, 1, directory);
 }
