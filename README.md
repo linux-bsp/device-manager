@@ -23,6 +23,7 @@
 - `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
 - `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
 - `logging/`：本地日志组件及集成测试。
+- `config/hwid-registry.json`：产品线、项目和型号名称字典，按上级编码匹配；维护规则见 [HWID 文档](docs/hwid.md#名称字典)。
 - `tests/`：固件事务、恢复和版本显示测试。
 
 ## 构建

@@ -76,6 +76,9 @@ try {
     await screenshot('dashboard-desktop.png');
     await evaluate("document.querySelector('#module-devices').click()");
     await until(()=>evaluate("!document.querySelector('#devices-panel').hidden && document.querySelectorAll('#device-list tr').length===1"),'Device list');
+    await evaluate("document.querySelector('#device-search').value='H200 CCM 桥接板';document.querySelector('#device-search').dispatchEvent(new Event('input'))");
+    assert.equal(await evaluate("document.querySelectorAll('#device-list tr').length"),1,'Device search by registered names');
+    await evaluate("document.querySelector('#device-search').value='';document.querySelector('#device-search').dispatchEvent(new Event('input'))");
     await evaluate("document.querySelector('#device-list button').click()");
     assert(await evaluate("document.querySelector('#device-detail').textContent.includes('browser-test')"),'Device detail');
     await screenshot('device-detail-desktop.png');
@@ -102,6 +105,7 @@ try {
     assert(draft && !draft.publication,'New draft should be unpublished');
     assert(draft.tag && draft.firmware_id);
     const expectedTag=draft.tag;
+    await until(()=>evaluate("document.querySelector('#drafts').textContent.includes('计算载荷 · H200 · CCM 桥接板 · PCB v1.0')"),'registered hardware names');
     async function screenshot(name){
         const {data}=await rpc('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
         await writeFile(join(outputDir,name),Buffer.from(data,'base64'));
@@ -134,6 +138,11 @@ try {
     async function search(tab,text){
         await evaluate(`document.querySelector('#tab-${tab}').click();document.querySelector('#search-${tab}').value=${JSON.stringify(text)};document.querySelector('#search-${tab}').dispatchEvent(new Event('input'))`);
     }
+    await search('manage','H200 CCM 桥接板');
+    assert.equal(await evaluate("document.querySelectorAll('#drafts tr:not([hidden])').length"),1,'Search registered product names');
+    await search('manage','1-01-0001-0001-10-000');
+    assert.equal(await evaluate("document.querySelectorAll('#drafts tr:not([hidden])').length"),1,'Search grouped HWID');
+    await search('manage','');
     await search('history',draft.firmware_id.slice(32));
     assert.equal(await evaluate("document.querySelectorAll('#devices tr:not([hidden])').length"),1,'Search full hash beyond display prefix');
     await search('history','browser-test 升级成功');
@@ -168,7 +177,7 @@ try {
     await rpc('Page.navigate',{url:url+'/firmware?kind=release&id='+after.latest+'&tab=releases'});
     await until(()=>evaluate("document.querySelector('#firmware-detail')?.textContent.includes('设备下载次数')"),'firmware detail');
     const detail=await evaluate("document.querySelector('#firmware-detail').textContent");
-    for(const field of ['适用 HWID','1010001000110000','项目 0001','PCB v1.0','上传时间','版本号','更新成功次数','更新失败次数','是否有效',expectedTag,draft.firmware_id]) assert(detail.includes(field),field);
+    for(const field of ['适用 HWID','1010001000110000','项目 0001（H200）','产品型号 0001（CCM 桥接板）','计算载荷','PCB v1.0','上传时间','版本号','更新成功次数','更新失败次数','是否有效',expectedTag,draft.firmware_id]) assert(detail.includes(field),field);
     assert(await evaluate("!document.querySelector('#firmware-detail').textContent.includes('产品 / 布局')"));
     assert(await evaluate("document.querySelector('#overview').hidden"));
     assert(await evaluate("document.querySelector('#firmware-detail a.download').href.includes('/api/download/release/')"));

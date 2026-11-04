@@ -131,7 +131,7 @@ function renderFleet(data) {
   const list=$('device-list');list.replaceChildren();
   const query=$('device-search').value.trim().toLowerCase();let shown=0;
   for(const item of devices){
-    const searchable=JSON.stringify(item).toLowerCase();
+    const searchable=JSON.stringify({...item,hardware:FirmwareHardware.describe(item.hwid)}).toLowerCase();
     if(query&&!query.split(/\s+/).every(token=>searchable.includes(token)))continue;
     shown++;
     const row=document.createElement('tr');list.append(row);

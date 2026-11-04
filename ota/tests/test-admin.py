@@ -119,6 +119,16 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
     def assert_no_partial(self):
         self.assertEqual(list((self.feed / 'drafts').glob('.upload-*')), [])
 
+    def test_hwid_registry_is_a_read_only_display_dictionary(self):
+        status, body = self.request('GET', '/api/hwid-registry')
+        self.assertEqual(status, 200)
+        expected = json.loads((SOURCE.parent / 'config/hwid-registry.json').read_text())
+        self.assertEqual(json.loads(body), expected)
+        self.assertEqual(self.request('HEAD', '/api/hwid-registry'), (200, b''))
+        self.assertEqual(self.request('POST', '/api/hwid-registry')[0], 405)
+        self.assertEqual(self.request('DELETE', '/api/hwid-registry')[0], 405)
+        self.assertEqual(self.state()['latest'], 0)
+
     def test_small_packed_version_tags(self):
         for value, tag in ((1, 'v0.0.1'), (256, 'v0.1.0')):
             ident = self.draft(self.bundle(self.fixture(version=value)))

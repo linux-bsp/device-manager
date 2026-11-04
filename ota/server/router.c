@@ -284,6 +284,10 @@ void server_route_client(int client, const struct server_context *context)
     char *query = strchr(path, '?');
     if (query)
         *query = '\0';
+    if (!strcmp(path, "/api/hwid-registry")) {
+        http_json(client, 200, "OK", (const char *)hwid_registry_json, head);
+        return;
+    }
     if (!strncmp(path, "/api/download/", 14)) {
         char kind[16], id[64], extra, canonical[128], filename[128], header[512];
         unsigned long long bytes;

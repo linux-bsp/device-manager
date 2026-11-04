@@ -7,7 +7,7 @@ function size(bytes){return (bytes/1048576).toFixed(1)+' MiB';}
 function uploadTime(item){return item.uploaded_at?new Date(item.uploaded_at*1000).toLocaleString():'未知';}
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
 function detailLink(item,tab=activeTab()){const a=document.createElement('a');a.textContent='查看详情';a.href='/firmware?kind='+((item.id||'').startsWith('draft-')?'draft':'release')+'&id='+encodeURIComponent(item.id)+'&tab='+tab;return a;}
-function identityCells(row,item){cell(row,FirmwareHardware.product(item.hwid||item.hwids?.[0]));cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
+function identityCells(row,item){const hwid=item.hwid||item.hwids?.[0];cell(row,FirmwareHardware.product(hwid)).title=FirmwareHardware.describe(hwid);cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
 function invalidButton(){const b=document.createElement('button');b.type='button';b.className='invalid';b.disabled=true;b.textContent='无效固件，禁止发布';b.title='固件已隔离，不能发布到设备';return b;}
 function publishingButton(){const b=document.createElement('button');b.type='button';b.className='publishing';b.disabled=true;b.textContent='当前发布版本';return b;}
 function activeTab(){return document.querySelector('[data-tab][aria-selected=true]')?.dataset.tab||'manage';}
@@ -23,7 +23,7 @@ function state(){
  controls();return refreshing;
 }
 async function loadState(){
- const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw new Error('无法读取版本列表，请检查服务日志。');
+ const [response]=await Promise.all([fetch('/api/state',{cache:'no-store'}),FirmwareHardware.loadRegistry()]);if(!response.ok)throw new Error('无法读取版本列表，请检查服务日志。');
  const data=await response.json();
  renderFleet(data);
  $('service-health').textContent='管理服务已连接';$('service-health').classList.remove('error');
