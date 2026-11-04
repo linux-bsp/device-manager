@@ -35,7 +35,7 @@ static void usage(const char *program)
            "Defaults: --bind 127.0.0.1 --port 8090\n"
            "Open / in a browser to upload and publish firmware bundles.\n"
            "CLI publishing: device-server publish --root DIR --source RELEASE_DIR "
-           "--version NUMBER --hwid HEX16\n", program);
+           "--version NUMBER\n", program);
 }
 
 int main(int argc, char **argv)

@@ -106,9 +106,10 @@ try {
         const {data}=await rpc('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
         await writeFile(join(outputDir,name),Buffer.from(data,'base64'));
     }
+    assert(await evaluate("!document.querySelector('[data-hwid]') && !document.querySelector('select[aria-label=\"目标 HWID\"]')"),'Firmware hardware scope is read-only');
     await screenshot('uploaded-desktop.png');
     await evaluate(`document.querySelector('[data-publish="${draft.id}"]').click()`);
-    await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('已发布到 HWID ')"),'publish button');
+    await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('已发布，适用设备由固件包内的 HWID 声明确定。')"),'publish button');
     await until(async()=>{
         const state=await (await fetch(url+'/api/state')).json();
         return state.latest>before.latest;

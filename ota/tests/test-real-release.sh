@@ -15,7 +15,7 @@ cleanup()
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 "$src/device-server" publish --root "$scratch/feed" --source "$release" \
-    --version 1 --hwid 1010001000110000
+    --version 1
 "$src/device-server" --root "$scratch/feed" --port 0 > "$scratch/server.log" 2>&1 &
 pid=$!
 i=0

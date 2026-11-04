@@ -221,7 +221,7 @@ class AutomaticOTA(unittest.TestCase):
         self.write_snapshot('FWOTA1 0 0 255 65536 1 4 65537 0 5\n')
         self.agent()
         draft = self.draft(self.bundle(self.files))
-        self.assertEqual(self.request('POST', '/api/publish/'+draft+'/1010001000110000', b'', {'X-OTA-Request':'1'})[0], 409)
+        self.assertEqual(self.request('POST', '/api/publish/'+draft, b'', {'X-OTA-Request':'1'})[0], 409)
         self.assertEqual(self.state()['latest'], 0)
         status, body = self.request('GET', '/api/policy/another-board/1')
         self.assertEqual(status, 200)

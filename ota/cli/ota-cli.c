@@ -18,7 +18,7 @@ static void usage(FILE *out)
         "Usage: ota-cli [--server URL] [--json] COMMAND [ARG]\n"
         "  list                 Show drafts, publications and device upgrade history\n"
         "  upload PACKAGE.tar.gz Upload and validate a draft (does not publish)\n"
-        "  publish draft-ID --hwid HEX16     Publish this draft; devices may install and reboot\n"
+        "  publish draft-ID     Publish to every HWID declared in the firmware\n"
         "Server defaults to OTA_SERVER, or http://127.0.0.1:8090.\n"
         "--json preserves the server JSON for automation; default output is indented.\n"
         "Requires curl in PATH. No GUI, local feed directory or root access needed.\n");
@@ -151,12 +151,11 @@ static int request(const char *url, const char *command, int upload_fd, int raw)
 
 int main(int argc, char **argv)
 {
-    const char *server = getenv("OTA_SERVER"), *command = NULL, *arg = NULL, *hwid = NULL;
+    const char *server = getenv("OTA_SERVER"), *command = NULL, *arg = NULL;
     int raw = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--help")) { usage(stdout); return 0; }
-        if (!strcmp(argv[i], "--hwid") && i + 1 < argc) hwid = argv[++i];
-        else if (!strcmp(argv[i], "--json")) raw = 1;
+        if (!strcmp(argv[i], "--json")) raw = 1;
         else if (!strcmp(argv[i], "--server") && i + 1 < argc) server = argv[++i];
         else if (!command && argv[i][0] != '-') command = argv[i];
         else if (command && !arg && argv[i][0] != '-') arg = argv[i];
@@ -174,9 +173,8 @@ int main(int argc, char **argv)
     char url[4096];
     int upload_fd = -1;
     if (!strcmp(command, "publish")) {
-        if (!hwid || strlen(hwid) != 16 || strspn(hwid, "0123456789abcdef") != 16) { fprintf(stderr, "ota-cli: publish requires --hwid HEX16\n"); return 2; }
         if (!draft_id(arg)) { fprintf(stderr, "ota-cli: expected draft-ID from upload/list\n"); return 2; }
-        snprintf(url, sizeof(url), "%.*s/api/publish/%s/%s", (int)len, server, arg, hwid);
+        snprintf(url, sizeof(url), "%.*s/api/publish/%s", (int)len, server, arg);
     } else {
         snprintf(url, sizeof(url), "%.*s/api/%s", (int)len, server,
             !strcmp(command, "list") ? "state" : "upload");

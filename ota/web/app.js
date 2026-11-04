@@ -15,7 +15,7 @@ const lists={manage:'drafts',history:'devices',releases:'releases',audit:'audit'
 function filterRows(tab){const tokens=$('search-'+tab).value.trim().toLowerCase().split(/\s+/).filter(Boolean);let visible=0,total=0;for(const row of $(lists[tab]).children){total++;const text=((row.dataset.search||'')+' '+row.textContent).toLowerCase();row.hidden=!tokens.every(t=>text.includes(t));if(!row.hidden)visible++;}$('count-'+tab).textContent=`${visible} / ${total} 条`;$('empty-'+tab).hidden=visible>0;}
 function downloadLink(item){const link=document.createElement('a');link.className='download';link.textContent='下载固件包';link.href='/api/download/'+(item.id.startsWith('draft-')?'draft':'release')+'/'+encodeURIComponent(item.id);return link;}
 function badge(td,text,current=false){const span=document.createElement('span');span.className='badge'+(current?' green':'');span.textContent=text;td.append(span);}
-function controls(){ const disabled=busy||!!refreshing; $('upload-button').disabled=disabled||!$('firmware').files.length; $('firmware').disabled=disabled; document.querySelectorAll('[data-refresh]').forEach(b=>b.disabled=disabled); document.querySelectorAll('[data-publish], [data-hwid]').forEach(b=>b.disabled=disabled); }
+function controls(){ const disabled=busy||!!refreshing; $('upload-button').disabled=disabled||!$('firmware').files.length; $('firmware').disabled=disabled; document.querySelectorAll('[data-refresh]').forEach(b=>b.disabled=disabled); document.querySelectorAll('[data-publish]').forEach(b=>b.disabled=disabled); }
 function state(){
  if(refreshing)return refreshing;
  refreshing=loadState().finally(()=>{refreshing=null;controls();});
@@ -161,23 +161,16 @@ function publicationControls(container,item,data){
  if(!item.valid){container.append(invalidButton());return;}
  const hwids=item.hwids||[];
  if(!hwids.length){container.textContent='未声明适用 HWID，不能发布';return;}
- const select=document.createElement('select');select.dataset.hwid='';select.setAttribute('aria-label','目标 HWID');
- for(const id of hwids){const option=document.createElement('option');option.value=id;option.textContent=id;select.append(option);}
- select.value=hwids.includes(item.hwid)?item.hwid:hwids[0];container.append(select);
- const slot=document.createElement('div');container.append(slot);
- const update=()=>{
-  slot.replaceChildren();select.title=FirmwareHardware.product(select.value);
-  const active=data.releases.some(x=>x.published&&x.hwid===select.value&&x.firmware_id===item.firmware_id);
-  if(active){slot.append(publishingButton());return;}
-  if(!source){slot.textContent='未发布';return;}
-  const button=document.createElement('button');button.type='button';button.textContent='发布到设备';button.dataset.publish=source.id;
-  button.onclick=()=>publish(source.id,select.value);slot.append(button);
- };
- select.onchange=update;update();
+ const active=hwids.every(hwid=>data.releases.some(x=>x.published&&x.hwid===hwid&&x.firmware_id===item.firmware_id));
+ if(active){container.append(publishingButton());return;}
+ if(!source){container.textContent='未发布';return;}
+ const button=document.createElement('button');button.type='button';button.textContent='发布到设备';button.dataset.publish=source.id;
+ button.title=`按固件包声明发布到全部 ${hwids.length} 个 HWID，不能手动修改适用硬件`;
+ button.onclick=()=>publish(source.id);container.append(button);
 }
-async function publish(id,hwid){
+async function publish(id){
  busy=true;controls();
- try{const r=await fetch('/api/publish/'+id+'/'+encodeURIComponent(hwid),{method:'POST',headers:{'X-OTA-Request':'1'}});const result=await r.json();if(!r.ok)throw new Error(result.error||'发布失败');notice(`已发布到 HWID ${hwid}。匹配的设备将在下次检查时获取该版本。`);await state();}
+ try{const r=await fetch('/api/publish/'+id,{method:'POST',headers:{'X-OTA-Request':'1'}});const result=await r.json();if(!r.ok)throw new Error(result.error||'发布失败');notice('已发布，适用设备由固件包内的 HWID 声明确定。');await state();}
  catch(error){notice(error.message,true);}finally{busy=false;controls();}
 }
 $('firmware').addEventListener('change',()=>{const f=$('firmware').files[0];$('file-info').textContent=f?f.name+' · '+size(f.size):'';controls();});

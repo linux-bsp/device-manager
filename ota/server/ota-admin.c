@@ -405,28 +405,35 @@ int ota_admin_state(const char *root, char **json)
     return 0;
 }
 
-int ota_admin_publish(const char *root, const char *id, const char *hwid, unsigned long long *number)
+int ota_admin_publish(const char *root, const char *id, unsigned long long *number)
 {
-    if (!draft_id(id) || !ota_hwid_valid(hwid)) return 404;
+    if (!draft_id(id)) return 404;
     char drafts[OTA_PATH], source[OTA_PATH];
     if (ota_path(drafts, root, "drafts") || ota_path(source, drafts, id) || !regular_directory(source)) return 404;
-    struct release r, latest; unsigned long version;
+    struct release r; unsigned long version;
     char hwids[OTA_HWIDS_SIZE];
-    if (ota_inspect(source, &r, &version) || ota_fit_hwids(source, hwids) || !ota_hwid_supported(hwids, hwid)) return 422;
+    if (ota_inspect(source, &r, &version) || ota_fit_hwids(source, hwids)) return 422;
     int blocked = ota_quarantine_blocked(root, source);
     if (blocked) return blocked > 0 ? 409 : 503;
-    if (!ota_channel_read(root, hwid, &latest)) {
-        char relative[64], directory[OTA_PATH]; struct ota_catalog_identity current, candidate;
+    struct ota_catalog_identity candidate;
+    if (ota_catalog_get(root, source, &candidate)) return 503;
+    int all_current = 1; *number = 0;
+    for (size_t offset = 0; offset < strlen(hwids); offset += 17) {
+        char hwid[17], relative[64], directory[OTA_PATH];
+        struct release latest; struct ota_catalog_identity current;
+        memcpy(hwid, hwids + offset, 16); hwid[16] = 0;
+        if (ota_channel_read(root, hwid, &latest)) { all_current = 0; continue; }
         snprintf(relative, sizeof(relative), "releases/%llu", latest.version);
-        if (ota_path(directory, root, relative) || ota_catalog_get(root, directory, &current) || ota_catalog_get(root, source, &candidate)) return 503;
-        if (!strcmp(current.hash, candidate.hash)) { *number = latest.version; return 200; }
+        if (ota_path(directory, root, relative) || ota_catalog_get(root, directory, &current)) return 503;
+        if (strcmp(current.hash, candidate.hash)) all_current = 0;
+        if (!*number || latest.version < *number) *number = latest.version;
     }
+    if (all_current) return 200;
     *number = ota_publication_next(root);
     if (!*number) return 409;
     char value[32]; snprintf(value, sizeof(value), "%llu", *number);
-    char *args[] = {"device-server", "publish", "--root", (char *)root, "--source", source,
-        "--version", value, "--hwid", (char *)hwid, NULL};
-    return ota_publish(10, args) ? 409 : 200;
+    char *args[] = {"device-server", "publish", "--root", (char *)root, "--source", source, "--version", value, NULL};
+    return ota_publish(8, args) ? 409 : 200;
 }
 
 /* Explicit management export, including quarantined firmware for audit. Device

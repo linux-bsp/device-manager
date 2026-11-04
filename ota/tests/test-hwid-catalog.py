@@ -72,7 +72,7 @@ class Hardware(unittest.TestCase):
         self.assertEqual(self.counter.read_text(), '')
         with sqlite3.connect(h.feed / 'firmware.db') as db:
             self.assertEqual(db.execute('SELECT hwids FROM firmware_hardware').fetchall(),
-                             [(HWID + ' ' + OTHER,), (HWID + ' ' + OTHER,)])
+                             [(HWID + ' ' + OTHER,)] * 3)
 
     def test_old_catalog_backfills_without_rehashing_firmware(self):
         h = self.http

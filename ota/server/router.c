@@ -263,9 +263,9 @@ void server_route_client(int client, const struct server_context *context)
                 return;
             }
             unsigned long long number = 0;
-            char draft[64], hwid[17], extra;
-            int status = sscanf(path + 13, "%63[^/]/%16s%c", draft, hwid, &extra) == 2 ?
-                ota_admin_publish(context->directory, draft, hwid, &number) : 400;
+            char draft[64], extra;
+            int status = sscanf(path + 13, "%63[^/]%c", draft, &extra) == 1 ?
+                ota_admin_publish(context->directory, draft, &number) : 400;
             if (status == 200) {
                 char json[96];
                 snprintf(json, sizeof(json), "{\"publication\":%llu,\"status\":\"published\"}\n", number);

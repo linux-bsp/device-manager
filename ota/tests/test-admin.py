@@ -108,8 +108,8 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         self.assertEqual(status, 200, body)
         return json.loads(body)
 
-    def publish(self, ident, hwid="1010001000110000"):
-        return self.request('POST', '/api/publish/' + ident + '/' + hwid, headers={'X-OTA-Request': '1'})
+    def publish(self, ident):
+        return self.request('POST', '/api/publish/' + ident, headers={'X-OTA-Request': '1'})
 
     def draft(self, archive=None):
         status, body = self.upload(archive)
@@ -220,14 +220,14 @@ fw,kernel-sha256 = "{kernel}"; fw,rootfs-sha256 = "{rootfs}";
         self.assert_no_partial()
         self.assertEqual(self.request('GET', '/healthz'), (200, b'ok\n'))
 
-    def test_wrong_hwid_rejected_and_explicit_older_target_published(self):
+    def test_declared_hardware_and_explicit_older_target_published(self):
         self.assertEqual(self.publish(self.draft())[0], 200)
         for archive in [self.bundle(self.fixture(hwid='1010002000110000'))]:
             ident = self.draft(archive)
-            self.assertEqual(self.publish(ident)[0], 422)
-            self.assertEqual(self.state()['latest'], 1)
+            self.assertEqual(self.publish(ident)[0], 200)
+            self.assertEqual(self.state()['latest'], 2)
         self.assertEqual(self.publish(self.draft(self.bundle(self.fixture(version=65536))))[0], 200)
-        self.assertEqual(self.state()['latest'], 2)
+        self.assertEqual(self.state()['latest'], 3)
         self.assertEqual(self.publish('../escape')[0], 400)
         self.assertEqual(self.publish('draft-AAAAAA')[0], 404)
 

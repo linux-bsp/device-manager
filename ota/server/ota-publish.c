@@ -79,88 +79,71 @@ int ota_inspect(const char *directory, struct release *r, unsigned long *version
 int ota_publish(int argc, char **argv)
 {
     const char *root_arg = NULL, *source_arg = NULL;
-    struct release r = {0};
+    unsigned long long number = 0;
     for (int i = 2; i < argc; i += 2) {
-        if (i + 1 == argc)
-            goto usage;
-        if (!strcmp(argv[i], "--root"))
-            root_arg = argv[i + 1];
-        else if (!strcmp(argv[i], "--source"))
-            source_arg = argv[i + 1];
+        if (i + 1 == argc) goto usage;
+        if (!strcmp(argv[i], "--root")) root_arg = argv[i + 1];
+        else if (!strcmp(argv[i], "--source")) source_arg = argv[i + 1];
         else if (!strcmp(argv[i], "--version")) {
-            char *end;
-            errno = 0;
-            r.version = strtoull(argv[i + 1], &end, 10);
-            if (errno || *end || !r.version || r.version > 2147483647)
-                goto usage;
-        } else if (!strcmp(argv[i], "--hwid") && ota_hwid_valid(argv[i + 1]))
-            strcpy(r.hwid, argv[i + 1]);
-        else
-            goto usage;
+            char *end; errno = 0;
+            number = strtoull(argv[i + 1], &end, 10);
+            if (errno || *end || !number || number > 2147483647) goto usage;
+        } else goto usage;
     }
-    if (!root_arg || !source_arg || !r.version || !ota_hwid_valid(r.hwid))
-        goto usage;
-    char root[OTA_PATH], source[OTA_PATH], releases[OTA_PATH];
+    if (!root_arg || !source_arg || !number) goto usage;
+    char root[OTA_PATH], source[OTA_PATH], releases[OTA_PATH], hwids[OTA_HWIDS_SIZE];
     if (ota_mkdir(root_arg) || !realpath(root_arg, root) || !realpath(source_arg, source) ||
-        ota_path(releases, root, "releases") || ota_mkdir(releases)) {
-        perror("Publication directory");
-        return 1;
+        ota_path(releases, root, "releases") || ota_mkdir(releases) || ota_fit_hwids(source, hwids)) {
+        fprintf(stderr, "Invalid publication directory or firmware HWID declaration\n"); return 1;
     }
+    size_t count = (strlen(hwids) + 1) / 17;
+    if (!count || number + count - 1 > 2147483647) return 1;
+    struct release *batch = calloc(count, sizeof(*batch));
+    if (!batch) return 1;
     int lock = ota_lock(root);
-    if (lock < 0) {
-        fprintf(stderr, "Another publisher is active or lock unavailable\n");
-        return 1;
-    }
+    if (lock < 0) { free(batch); fprintf(stderr, "Another publisher is active or lock unavailable\n"); return 1; }
     int rc = 1;
-    char temp[OTA_PATH], target[OTA_PATH], name[64], from[OTA_PATH], to[OTA_PATH];
-    snprintf(name, sizeof(name), "%llu", r.version);
-    if (ota_path(target, releases, name) || !access(target, F_OK) ||
-        ota_path(temp, releases, ".publish-XXXXXX") || !mkdtemp(temp)) {
-        fprintf(stderr, "Release already exists or staging failed\n");
-        goto done;
+    char temp[OTA_PATH] = "", target[OTA_PATH], first[OTA_PATH] = "", name[64], from[OTA_PATH], to[OTA_PATH];
+    for (size_t i = 0; i < count; i++) {
+        struct release *r = &batch[i];
+        if (i) *r = batch[0];
+        r->version = number + i;
+        memcpy(r->hwid, hwids + i * 17, 16); r->hwid[16] = 0;
+        snprintf(name, sizeof(name), "%llu", r->version);
+        if (ota_path(target, releases, name) || !access(target, F_OK) ||
+            ota_path(temp, releases, ".publish-XXXXXX") || !mkdtemp(temp)) { temp[0] = 0; goto done; }
+        for (int j = 0; j < 3; j++) {
+            if (ota_path(from, i ? first : source, ota_files[j]) || ota_path(to, temp, ota_files[j])) goto done;
+            /* New hardware snapshots share immutable payloads, but never link
+             * existing releases: their catalog fingerprints remain unchanged. */
+            if (i ? link(from, to) : (ota_copy(from, to) || ota_hash(to, r->hash[j], &r->size[j]))) goto done;
+        }
+        if (!i && validate_fit(temp, r)) goto done;
+        if (ota_path(to, temp, "manifest") || ota_write(to, r) ||
+            (!i && ota_quarantine_blocked(root, temp)) || ota_sync_dir(temp) ||
+            rename(temp, target) || ota_sync_dir(releases)) goto done;
+        temp[0] = 0;
+        if (!i) strcpy(first, target);
     }
-    for (int i = 0; i < 3; i++) {
-        if (ota_path(from, source, ota_files[i]) || ota_path(to, temp, ota_files[i]) ||
-            ota_copy(from, to) || ota_hash(to, r.hash[i], &r.size[i]))
-            goto cleanup;
+    /* All files, manifests and database identities must be durable before any
+     * device sees the new package. Orphan snapshots are safe after interruption. */
+    for (size_t i = 0; i < count; i++) {
+        struct ota_catalog_identity identity;
+        snprintf(name, sizeof(name), "%llu", batch[i].version);
+        if (ota_path(target, releases, name) || ota_catalog_get(root, target, &identity)) goto done;
     }
-    if (validate_fit(temp, &r)) {
-        fprintf(stderr, "FIT HWID, filenames or component SHA256 mismatch\n");
-        goto cleanup;
-    }
-    if (ota_path(to, temp, "manifest") || ota_write(to, &r) || ota_quarantine_blocked(root, temp)) {
-        fprintf(stderr, "Firmware is quarantined or quarantine validation failed\n");
-        goto cleanup;
-    }
-    /* Snapshot first; the atomic latest switch happens only after all files exist. */
-    if (ota_sync_dir(temp) ||
-        rename(temp, target) || ota_sync_dir(releases))
-        goto cleanup;
-    struct ota_catalog_identity identity;
-    if (ota_catalog_get(root, target, &identity)) {
-        fprintf(stderr, "Cannot persist firmware identity; latest unchanged\n");
-        goto done;
-    }
-    if (ota_channel_set(root, &r)) {
-        fprintf(stderr, "Snapshot retained; HWID channel publication failed\n");
-        goto done;
-    }
-    printf("Published HWID %s #%llu: /releases/%llu/release.itb\n", r.hwid, r.version, r.version);
+    if (ota_channels_set(root, batch, count)) goto done;
+    printf("Published firmware to %zu declared HWID channel(s), starting at #%llu\n", count, number);
     rc = 0;
-    goto done;
-cleanup:
-    for (int i = 0; i < 3; i++)
-        if (!ota_path(to, temp, ota_files[i]))
-            unlink(to);
-    if (!ota_path(to, temp, "manifest"))
-        unlink(to);
-    rmdir(temp);
-    fprintf(stderr, "Publication failed; latest unchanged\n");
 done:
-    close(lock);
-    return rc;
+    if (temp[0]) {
+        for (unsigned i = 0; i < 3; i++) if (!ota_path(to, temp, ota_files[i])) unlink(to);
+        if (!ota_path(to, temp, "manifest")) unlink(to);
+        rmdir(temp);
+    }
+    if (rc) fprintf(stderr, "Publication failed; inspect retained snapshots and channel state\n");
+    close(lock); free(batch); return rc;
 usage:
-    fprintf(stderr, "Usage: device-server publish --root DIR --source RELEASE_DIR "
-            "--version NUMBER --hwid HEX16\n");
+    fprintf(stderr, "Usage: device-server publish --root DIR --source RELEASE_DIR --version NUMBER\n");
     return 1;
 }

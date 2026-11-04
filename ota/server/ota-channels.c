@@ -1,8 +1,9 @@
 /* Each exact HWID owns one atomic, independently published channel. */
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include "ota-admin.h"
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -42,6 +43,55 @@ int ota_channel_set(const char *root, const struct release *release)
     if (ota_path(temporary, channels, name) || ota_write(temporary, release)) return -1;
     int rc = rename(temporary, path) || ota_sync_dir(channels) ? -1 : 0;
     unlink(temporary);
+    return rc;
+}
+
+static void remove_snapshot(const char *directory)
+{
+    DIR *dir = opendir(directory);
+    if (!dir) return;
+    struct dirent *entry; char path[OTA_PATH];
+    while ((entry = readdir(dir)))
+        if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..") &&
+            !ota_path(path, directory, entry->d_name)) (void)unlink(path);
+    closedir(dir);
+    (void)rmdir(directory);
+}
+
+/* Caller holds the publication lock. One Linux directory exchange commits the
+ * complete hardware set, including across process crashes and power loss. */
+int ota_channels_set(const char *root, const struct release *releases, size_t count)
+{
+    char channels[OTA_PATH], stage[OTA_PATH], from[OTA_PATH], to[OTA_PATH];
+    if (!count || count > OTA_HWID_LIMIT || ota_path(channels, root, "channels") ||
+        ota_path(stage, root, ".channels-XXXXXX") || !mkdtemp(stage)) return -1;
+    int rc = -1, exists = 0;
+    DIR *dir = opendir(channels);
+    if (dir) {
+        exists = 1;
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
+            if (entry->d_name[0] == '.') continue;
+            struct release previous;
+            if (!ota_hwid_valid(entry->d_name) || ota_path(from, channels, entry->d_name) ||
+                ota_read(from, &previous) || strcmp(previous.hwid, entry->d_name) ||
+                ota_path(to, stage, entry->d_name) || ota_write(to, &previous)) goto done;
+        }
+        closedir(dir); dir = NULL;
+    } else if (errno != ENOENT) goto done;
+    for (size_t i = 0; i < count; i++) {
+        if (!ota_hwid_valid(releases[i].hwid)) goto done;
+        for (size_t j = 0; j < i; j++)
+            if (!strcmp(releases[i].hwid, releases[j].hwid)) goto done;
+        if (ota_path(to, stage, releases[i].hwid) ||
+            (unlink(to) && errno != ENOENT) || ota_write(to, &releases[i])) goto done;
+    }
+    if (ota_sync_dir(stage) || ota_sync_dir(root)) goto done;
+    if (exists ? renameat2(AT_FDCWD, stage, AT_FDCWD, channels, RENAME_EXCHANGE) : rename(stage, channels)) goto done;
+    rc = ota_sync_dir(root);
+done:
+    if (dir) closedir(dir);
+    remove_snapshot(stage);
     return rc;
 }
 

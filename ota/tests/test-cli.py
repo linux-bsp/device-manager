@@ -26,9 +26,9 @@ class CLI(unittest.TestCase):
         state=json.loads(self.cli('list').stdout)
         self.assertEqual(state['drafts'][0]['id'],draft)
         self.assertIn('\n  "latest":',self.cli('list').stdout)
-        publication=json.loads(self.cli('publish',draft,'--hwid','1010001000110000').stdout)['publication']
+        publication=json.loads(self.cli('publish',draft).stdout)['publication']
         self.assertEqual(publication,1)
-        self.assertEqual(json.loads(self.cli('publish',draft,'--hwid','1010001000110000','--json').stdout)['publication'],1)
+        self.assertEqual(json.loads(self.cli('publish',draft,'--json').stdout)['publication'],1)
         self.assertEqual(self.state()['latest'],1)
     def test_cli_server_overrides_environment_and_json_is_exact(self):
         env=dict(self.env,OTA_SERVER='http://127.0.0.1:1')
@@ -42,14 +42,14 @@ class CLI(unittest.TestCase):
         self.assertEqual(self.state()['latest'],0)
         self.assertEqual(self.state()['drafts'],[])
     def test_missing_draft_and_explicit_older_target(self):
-        self.assertIn('HTTP',self.cli('publish','draft-missing','--hwid','1010001000110000',ok=False).stderr)
+        self.assertIn('HTTP',self.cli('publish','draft-missing',ok=False).stderr)
         newer=self.root/'new.tar.gz';newer.write_bytes(self.bundle(self.fixture(65538)))
-        new_id=json.loads(self.cli('upload',newer).stdout)['id'];self.cli('publish',new_id,'--hwid','1010001000110000')
-        old_id=json.loads(self.cli('upload',self.package).stdout)['id'];self.cli('publish',old_id,'--hwid','1010001000110000')
+        new_id=json.loads(self.cli('upload',newer).stdout)['id'];self.cli('publish',new_id)
+        old_id=json.loads(self.cli('upload',self.package).stdout)['id'];self.cli('publish',old_id)
         self.assertEqual(self.state()['latest'],2)
     def test_invalid_arguments_and_files(self):
         self.cli('--help')
-        for args in [(),('publish','../x'),('upload',self.root),('upload',self.root/'missing'),('list','extra'),('upload',),('--server','file:///tmp/feed','list')]:
+        for args in [(),('publish','../x'),('upload',self.root),('upload',self.root/'missing'),('list','extra'),('upload',),('--server','file:///tmp/feed','list'),('publish','draft-XXXXXX','--hwid','1010001000110000')]:
             with self.subTest(args=args):self.assertEqual(self.cli(*args,ok=False).returncode,2)
         link=self.root/'link.tar.gz';link.symlink_to(self.package)
         self.assertEqual(self.cli('upload',link,ok=False).returncode,2)
@@ -66,7 +66,7 @@ class CLI(unittest.TestCase):
         package=Path(os.environ['OTA_CLI_TEST_PACKAGE'])
         draft=json.loads(self.cli('upload',package).stdout)['id']
         self.assertEqual(self.state()['latest'],0)
-        publication=json.loads(self.cli('publish',draft,'--hwid','1010001000110000').stdout)['publication']
+        publication=json.loads(self.cli('publish',draft).stdout)['publication']
         identity_status, identity = self.request('GET', f'/releases/{publication}/identity')
         self.assertEqual(identity_status, 200, identity)
         self.assertTrue(identity.startswith(f'BSPOTAIMAGE1 {publication} '.encode()))
@@ -100,8 +100,8 @@ class CLI(unittest.TestCase):
             for name in ('release.itb','kernel.itb','rootfs.itb'):
                 with archive.extractfile(name) as source:
                     self.assertEqual(hashlib.sha256(source.read()).digest(),
-                        hashlib.sha256((cache/str(publication)/name).read_bytes()).digest())
-        self.assertEqual(restore_package,(cache/str(publication)/'rootfs.itb').read_bytes())
+                        hashlib.sha256((cache/'1010001000110000'/str(publication)/name).read_bytes()).digest())
+        self.assertEqual(restore_package,(cache/'1010001000110000'/str(publication)/'rootfs.itb').read_bytes())
         self.assertEqual(json.loads(self.cli('list').stdout)['latest'],publication)
 
     def test_list_preserves_device_history(self):

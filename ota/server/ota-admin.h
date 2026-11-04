@@ -13,6 +13,7 @@ int ota_hwid_supported(const char *values, const char *hwid);
 int ota_channel_path(const char *root, const char *hwid, char path[OTA_PATH]);
 int ota_channel_read(const char *root, const char *hwid, struct release *release);
 int ota_channel_set(const char *root, const struct release *release);
+int ota_channels_set(const char *root, const struct release *releases, size_t count);
 int ota_channel_active(const char *root, const struct release *release);
 unsigned long long ota_publication_next(const char *root);
 unsigned long long ota_channel_max(const char *root);
@@ -51,5 +52,5 @@ void ota_draft_cleanup(const char *temp);
 int ota_draft_finish(const char *root, const char *temp, char id[32]);
 int ota_admin_state(const char *root, char **json);
 int ota_admin_bundle(const char *root, const char *kind, const char *id, char filename[128], unsigned long long *size);
-int ota_admin_publish(const char *root, const char *id, const char *hwid, unsigned long long *number);
+int ota_admin_publish(const char *root, const char *id, unsigned long long *number);
 #endif

@@ -49,11 +49,13 @@ AM625 新版固件配置的 `hwid-config=/etc/fw_env.config` 要求 FIT 的 `fw,
 
 刷新页面从数据库读取，旧数据库首次读取时仅补充 HWID 元数据，不重新计算固件哈希。缺少声明的历史记录保留原状；新上传的非规范、重复或过长声明会被拒绝。
 
-服务端按完整 HWID 独立发布。每个通道同时只有一个当前版本，发布到一个 HWID 不改变其他通道。固件可以声明多个 HWID，但 release、kernel、rootfs 三份 FIT 必须共同支持声明的全部硬件；发布时选择其中一个目标。
+适用 HWID 在构建时写入 FIT 的 `fw,hwids` 列表，上传后自动解析并只读显示。release、kernel、rootfs 三份 FIT 必须共同支持声明的全部硬件；页面和 CLI 不接受人为指定、增加或删减 HWID。上传只保存草稿，点击发布后自动更新包内声明的全部通道，各 HWID 同时只有一个当前版本。
+
+每种硬件的发布快照分别保留上报与回退记录，共享此次新建的不可变固件数据。服务端先持久化全部快照和数据库身份，再用 Linux 原子目录交换一起切换通道，准备失败不会下发部分新版本；不在包内声明中的通道保持不变。
 
 ```sh
 ota-cli --server http://127.0.0.1:8090 upload firmware.tar.gz
-ota-cli --server http://127.0.0.1:8090 publish draft-XXXXXX --hwid 1010001000110000
+ota-cli --server http://127.0.0.1:8090 publish draft-XXXXXX
 ```
 
 设备使用 `fwctld --hwid HEX16`，启动脚本从 `fwctl hwid value` 获取该值。查询路径为 `/latest/HEX16`，所有 OTA 下载请求携带 `X-OTA-HWID`；下载其他硬件通道的文件会被拒绝。缓存位于 `<cache>/<HWID>/`，避免切换硬件身份后复用其他通道状态。

@@ -52,7 +52,7 @@ class Quarantine(unittest.TestCase):
         self.assertEqual(self.request('GET','/releases/2/rootfs.itb')[0],410)
         self.assertEqual(self.request('GET','/releases/3/kernel.itb')[0],200)
         draft=self.draft(self.bundle(self.bad))
-        self.assertEqual(self.request('POST','/api/publish/'+draft+'/1010001000110000',b'',{'X-OTA-Request':'1'})[0],409)
+        self.assertEqual(self.request('POST','/api/publish/'+draft,b'',{'X-OTA-Request':'1'})[0],409)
         events=state['audit_events']
         self.assertEqual({e['action'] for e in events},{'quarantined','distribution-stopped','fallback-selected','fallback-published'})
         self.assertTrue(all(len(e['kernel_sha256'])==64 and len(e['rootfs_sha256'])==64 for e in events))

@@ -56,7 +56,7 @@ EOF
 publish()
 {
     "$src/device-server" publish --root "$scratch/feed" --source "$scratch/source" \
-        --version "$1" --hwid 1010001000110000
+        --version "$1"
 }
 agent()
 {
