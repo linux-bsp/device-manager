@@ -4,6 +4,7 @@ let busy = false;
 let refreshing = null;
 function notice(message, error=false){$('notice').textContent=message;$('notice').className='notice'+(error?' error':'');$('notice').hidden=false;}
 function size(bytes){return (bytes/1048576).toFixed(1)+' MiB';}
+function uploadTime(item){return item.uploaded_at?new Date(item.uploaded_at*1000).toLocaleString():'未知';}
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
 function detailLink(item,tab=activeTab()){const a=document.createElement('a');a.textContent='查看详情';a.href='/firmware?kind='+((item.id||'').startsWith('draft-')?'draft':'release')+'&id='+encodeURIComponent(item.id)+'&tab='+tab;return a;}
 function identityCells(row,item){cell(row,FirmwareHardware.product(item.hwid||item.hwids?.[0]));cell(row,item.tag||item.firmware_version||'未知');const td=cell(row,item.firmware_id?item.firmware_id.slice(0,8):'未知');td.title=item.firmware_id||'历史记录未保存固件 ID';}
@@ -48,7 +49,7 @@ async function loadState(){
  for(const [items,tbody] of [[manageItems,'drafts'],[data.releases,'releases']]){
   for(const d of [...items].sort((a,b)=>tbody==='drafts'?(Number(!!b.published)-Number(!!a.published))||b.created-a.created||b.publication-a.publication:b.created-a.created||b.publication-a.publication)){
    const row=document.createElement('tr');if(tbody==='drafts')row.dataset.draft=d.id;
-   identityCells(row,d);cell(row,size(d.bytes));
+   identityCells(row,d);cell(row,size(d.bytes));cell(row,uploadTime(d));
    const action=cell(row,'');
    publicationControls(action,d,data);
    cell(row,'').append(detailLink(d,tbody==='drafts'?'manage':'releases'));
@@ -136,7 +137,7 @@ function renderDetails(data){
  const incidents=history.filter(x=>x.category==='device-error');
  const active=publications.filter(x=>x.published).map(x=>x.hwid);
  const table=document.createElement('table');pane.append(table);
- const rows=[['上传时间',item.uploaded_at?new Date(item.uploaded_at*1000).toLocaleString():'未知'],
+ const rows=[['上传时间',uploadTime(item)],
  ['版本号',item.tag||item.firmware_version],['内容哈希',item.firmware_id],['产品信息',FirmwareHardware.product(item.hwid||item.hwids?.[0])],
  ['固件大小',size(item.bytes)],['发布状态',active.length?'当前 HWID 通道：'+active.join('、'):'未发布'],
  ['是否有效',item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],

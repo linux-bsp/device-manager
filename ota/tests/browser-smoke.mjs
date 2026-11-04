@@ -149,7 +149,11 @@ try {
         assert(await evaluate(`!document.querySelector('#panel-${tab}').hidden`));
         await search(tab,'');
     }
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('#drafts-table th')].map(x=>x.textContent)"),['产品','固件版本','固件ID','大小','操作','详情']);
+    for(const table of ['drafts','releases']){
+        assert.deepEqual(await evaluate(`[...document.querySelectorAll('#${table}-table th')].map(x=>x.textContent)`),['产品','固件版本','固件ID','大小','上传时间','操作','详情']);
+        const uploaded=await evaluate(`document.querySelector('#${table} tr').children[4].textContent`);
+        assert.equal(uploaded,await evaluate(`new Date(${draft.uploaded_at}*1000).toLocaleString()`),'Original upload time in '+table);
+    }
     await evaluate("document.querySelector('#tab-manage').click()");
     assert(await evaluate("!document.querySelector('#overview a.download')"),'Download only in details');
     for(const table of ['drafts','releases'])assert(await evaluate(`document.querySelector('#${table} .publishing').disabled && document.querySelector('#${table} .publishing').textContent==='当前发布版本' && getComputedStyle(document.querySelector('#${table} .publishing')).backgroundColor==='rgb(220, 252, 231)'`),'Green current release button');
