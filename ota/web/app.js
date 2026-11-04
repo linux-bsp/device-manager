@@ -224,7 +224,7 @@ function solDecode(text){return new TextDecoder().decode(Uint8Array.from(text,c=
 async function solGet(path){const r=await fetch(path,{cache:'no-store',headers:sol.token?{Authorization:'Bearer '+sol.token}:{}});const body=await r.json();if(!r.ok)throw Error(body.error||'日志请求失败');return body;}
 function solRender(){const query=$('sol-filter').value.toLowerCase();$('sol-output').textContent=query?sol.text.split('\n').filter(line=>line.toLowerCase().includes(query)).join('\n'):sol.text;if($('sol-live').checked)$('sol-output').scrollTop=$('sol-output').scrollHeight;}
 function solReset(){sol.generation++;sol.cursor=0;sol.text='';sol.console=new SolConsole();solRender();}
-function solBoots(follow=false){const old=$('sol-boot').value;$('sol-boot').replaceChildren();for(const row of sol.rows.filter(r=>r.device===$('sol-device').value)){const o=document.createElement('option');o.value=row.boot;o.textContent=SolNames.label(row);o.title=SolNames.archived(row)?'服务器首次接收归档时间（北京时间），记录 ID：'+row.boot:'启动 ID：'+row.boot;$('sol-boot').append(o);}if(!follow&&[...$('sol-boot').options].some(o=>o.value===old))$('sol-boot').value=old;solReset();}
+function solBoots(follow=false){const old=$('sol-boot').value;$('sol-boot').replaceChildren();for(const row of sol.rows.filter(r=>r.device===$('sol-device').value)){const o=document.createElement('option');o.value=row.boot;o.textContent=SolNames.label(row);o.title=SolNames.archived(row)?'服务器首次接收归档时间（北京时间），记录 ID：'+row.boot:'启动 ID：'+row.boot;$('sol-boot').append(o);}if(!follow&&[...$('sol-boot').options].some(o=>o.value===old))$('sol-boot').value=old;solReset();solRecordOptions();}
 async function solIndex(rows=null,follow=false){if(!rows)rows=await solGet('/api/sol/devices');sol.rows=rows;const old=$('sol-device').value;$('sol-device').replaceChildren();for(const id of [...new Set(rows.map(r=>r.device))]){const o=document.createElement('option');o.value=id;o.textContent=id;$('sol-device').append(o);}if([...$('sol-device').options].some(o=>o.value===old))$('sol-device').value=old;solBoots(follow);if(!rows.length)$('sol-status').textContent='暂无设备日志，等待设备连接。';refreshFleetFromSol();}
 async function solPoll(){
  if(sol.busy||!sol.active||location.hash!=='#sol'||!$('sol-live').checked)return;
@@ -238,13 +238,13 @@ async function solPoll(){
 }
 $('sol-connect').onclick=async()=>{sol.token=$('sol-key').value.trim();if(!/^[a-f0-9]{64}$/.test(sol.token)){$('sol-status').textContent='请输入 64 位查看凭据';sol.token='';sol.active=false;return;}sol.active=true;try{await solIndex();await solPoll();}catch(e){$('sol-status').textContent=e.message;}};
 $('sol-disconnect').onclick=()=>{sol.active=false;sol.token='';$('sol-key').value='';solReset();$('sol-status').textContent='已断开';};
-$('sol-device').onchange=()=>{solBoots();solPoll();};$('sol-boot').onchange=$('sol-stage').onchange=()=>{solReset();solPoll();};
+$('sol-device').onchange=()=>{solBoots();solPoll();};$('sol-boot').onchange=$('sol-stage').onchange=()=>{solReset();solRecordOptions();solPoll();};
 $('sol-refresh').onclick=async()=>{if(!sol.active)return;try{await solIndex();await solPoll();}catch(e){$('sol-status').textContent=e.message;}};
 $('sol-filter').oninput=solRender;$('sol-live').onchange=()=>solPoll();
 $('sol-export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([$('sol-output').textContent],{type:'text/plain;charset=utf-8'}));const row=sol.rows.find(r=>r.device===$('sol-device').value&&r.boot===$('sol-boot').value);a.download=SolNames.filename(row,$('sol-stage').value);a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 fetch('/api/sol/config',{cache:'no-store'}).then(r=>r.json()).then(async config=>{if(config.open_view){$('sol-auth').hidden=true;sol.active=true;$('sol-status').textContent='正在连接设备日志';await solIndex();await solPoll();}else $('sol-auth').hidden=false;}).catch(e=>{$('sol-status').textContent=e.message;});
 setInterval(solPoll,2000);
-setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await solGet('/api/sol/devices');const signature=a=>a.map(r=>r.device+'/'+r.boot).join('|');const selected=sol.rows.find(r=>r.device===$('sol-device').value&&r.boot===$('sol-boot').value);const follow=$('sol-live').checked&&!!selected&&solDecode(selected.meta).includes('current=yes');if(signature(rows)!==signature(sol.rows))await solIndex(rows,follow);else sol.rows=rows;}catch{}},10000);
+setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await solGet('/api/sol/devices');const signature=a=>a.map(r=>r.device+'/'+r.boot).join('|');const selected=sol.rows.find(r=>r.device===$('sol-device').value&&r.boot===$('sol-boot').value);const follow=$('sol-live').checked&&!!selected&&solDecode(selected.meta).includes('current=yes');if(signature(rows)!==signature(sol.rows))await solIndex(rows,follow);else {sol.rows=rows;solRecordOptions();}}catch{}},10000);
 
 function restoreTab(){
  const detail=location.pathname==='/firmware';

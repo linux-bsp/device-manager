@@ -2,6 +2,7 @@
 #include "sol.h"
 #include "sol-evidence.h"
 #include "sol-startup.h"
+#include "sol-delete.h"
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -75,7 +76,7 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db))return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
 }
 int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)
@@ -126,6 +127,14 @@ int sol_request(const char *root,const char *method,const char *path,const char 
     if(setup(root))return reply(out,503,"{\"error\":\"SOL storage unavailable\"}");
     char device[64],boot[64],stage[64],canonical[512],extra;
     long long order,gen,offset;
+    if(!strncmp(path,"/api/sol/records/",17)) {
+        if(strcmp(method,"DELETE")||length||sscanf(path,"/api/sol/records/%63[^/]/%63[^/]%c",device,boot,&extra)!=2||!identifier(device)||!identifier(boot))
+            return reply(out,400,"{\"error\":\"Invalid deletion request\"}");
+        snprintf(canonical,sizeof(canonical),"/api/sol/records/%s/%s",device,boot);
+        if(strcmp(path,canonical))return reply(out,400,"{\"error\":\"Invalid deletion path\"}");
+        if(!debug_no_auth&&!authorized(root,"viewer",auth))return reply(out,403,"{\"error\":\"Viewer credential required for deletion\"}");
+        return sol_delete_record(db,device,boot,peer,out);
+    }
     if(!strncmp(path,"/api/sol/startup/",17)) {
         if(sscanf(path,"/api/sol/startup/%63[^/]/",device)!=1||!identifier(device)||!strcmp(device,"viewer"))
             return reply(out,400,"{\"error\":\"Invalid startup device\"}");
@@ -140,6 +149,11 @@ int sol_request(const char *root,const char *method,const char *path,const char 
         if(strcmp(path,canonical)||(!stage_valid(stage)&&strcmp(stage,"meta")))return reply(out,400,"{\"error\":\"Invalid stream\"}");
         if(!debug_no_auth&&!authorized(root,device,auth))return reply(out,403,"{\"error\":\"Device credential rejected\"}");
         if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK)return reply(out,503,"{\"error\":\"SOL busy\"}");
+        int removed=sol_deleted_upload(db,device,boot,stage,gen,offset,length,out);
+        if(removed){
+            if(removed==200&&sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK)return removed;
+            sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);free(*out);return reply(out,503,"{\"error\":\"Deletion cursor unavailable\"}");
+        }
         sqlite3_stmt *s=statement("INSERT INTO boots VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(device,boot) DO UPDATE SET seen=excluded.seen,peer=excluded.peer,meta=CASE WHEN excluded.meta!='' THEN excluded.meta ELSE boots.meta END",device,boot,NULL,-1);
         if(!s)goto fail;
         sqlite3_bind_int64(s,3,order);sqlite3_bind_int64(s,4,time(NULL));sqlite3_bind_text(s,5,peer,-1,SQLITE_TRANSIENT);
@@ -189,6 +203,8 @@ fail:
             return reply(out,400,"{\"error\":\"Invalid log query\"}");
         snprintf(canonical,sizeof(canonical),"/api/sol/logs/%s/%s/%s/%lld",device,boot,stage,offset);
         if(strcmp(path,canonical))return reply(out,400,"{\"error\":\"Invalid log query\"}");
+        int removed=sol_deleted(db,device,boot);
+        if(removed)return reply(out,removed>0?410:503,"{\"error\":\"启动记录已删除或状态不可读\"}");
         s=statement("SELECT count(*) FROM startup_boots WHERE device=?1 AND boot=?2 AND committed=1",device,boot,NULL,-1);
         if(!s)return reply(out,503,"{\"error\":\"Query unavailable\"}");
         int archived=sqlite3_step(s)==SQLITE_ROW&&sqlite3_column_int(s,0)>0;sqlite3_finalize(s);

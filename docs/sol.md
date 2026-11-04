@@ -94,3 +94,11 @@ logctl show --stage uboot
 ### 双缓冲 v2 更新
 
 当前 AM625 已采用两组扩容的 SPL/U-Boot/kernel 启动缓存，正常健康确认及服务器持久归档后清理，下次从第一组开始。失败启动与恢复后的正常启动分别保存，不冒充同一次 boot ID；data 已完成持久存储验证。v1 段落保留为历史记录，不能用于描述当前双缓冲布局。配置、清单和限制见 [双缓冲启动日志](startup-buffers.md)，#43 实机结果见 workspace 的 `docs/am62x/bootlog-double-buffer-validation.md`。
+
+## 删除启动记录
+
+SOL 的启动记录下拉列表每行右侧有“×”。确认后删除该条服务器 SOL 记录与正文；正在采集的本次启动、仍未完成上传的快照禁止删除。删除其他行保留当前选择，删除正在查看的历史记录则切换到剩余记录。
+
+服务端 `DELETE /api/sol/records/<device>/<boot>` 要求 `X-OTA-Request: 1`，校验同源请求；普通模式需要 viewer 凭据，`--sol-open-view` 仅允许读取，调试免凭据模式可直接操作。删除在 SQLite 事务中完成，保存删除时间、来源 IP 和原字节数；删除标记与有限续传游标防止设备重试、进程重启或 ACK 丢失后重新生成记录。
+
+设备本地文件不删除，独立保存的 OTA 审计和事故附件不受影响。SQLite 删除页可供后续日志复用，不在每次操作时执行阻塞的 VACUUM。本功能只修改管理端，不要求更新设备固件。测试使用 `python3 ota/tests/test-sol-delete.py`，不删除生产设备历史。

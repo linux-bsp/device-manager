@@ -33,7 +33,7 @@ int http_headers(int client, int status, const char *reason,
         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n"
         "Content-Length: %ju\r\nConnection: close\r\n"
         "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
-        "Allow: GET, HEAD, POST\r\n\r\n", status, reason, type, length);
+        "Allow: GET, HEAD, POST, DELETE\r\n\r\n", status, reason, type, length);
     if (count < 0 || (size_t)count >= sizeof(buffer))
         return -1;
     return http_send_all(client, buffer, (size_t)count);

@@ -187,3 +187,13 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 @media (max-width: 900px) { .clock-layout, .clock-metrics { grid-template-columns: minmax(0,1fr); } }
 .clock-form input:not([type=checkbox]) { padding: 10px 12px; border: 1px solid #cad8e5; border-radius: 8px; font: inherit; color: #193047; background: white; }
 .clock-form input:disabled { background: #f1f5f9; color: #64748b; }
+.sol-boot-picker { position: relative; min-width: 180px; max-width: 100%; }
+#sol-boot-toggle { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.sol-boot-menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(620px, calc(100vw - 50px)); max-height: 380px; overflow: auto; border: 1px solid #cad8e5; border-radius: 8px; background: #fff; box-shadow: 0 12px 30px #19304724; }
+.sol-boot-menu ul { list-style: none; padding: 5px; margin: 0; }
+.sol-boot-menu li { display: flex; align-items: center; gap: 8px; padding: 4px; }
+.sol-boot-choice { flex: 1; min-width: 0; border: 0; border-radius: 5px; background: transparent; color: #193047; text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 400; }
+.sol-boot-choice:hover, .sol-boot-choice[aria-pressed=true] { background: #e4f3f1; color: #087e85; }
+.sol-boot-delete { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; font-size: 22px; line-height: 1; color: #a52b36; border: 0; background: transparent; border-radius: 5px; }
+.sol-boot-delete:hover:not(:disabled) { color: #a52b36; background: #fff0f1; }
+@media(max-width:540px){ .sol-boot-menu { position: fixed; left: 14px; right: 14px; top: 190px; width: auto; max-height: 60vh; } }

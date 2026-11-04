@@ -1,6 +1,7 @@
 /* Startup snapshots are independent of the bounded live SOL chunk retention. */
 #define _GNU_SOURCE
 #include "sol-startup.h"
+#include "sol-delete.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +85,11 @@ int sol_startup_request(sqlite3 *db, const char *method, const char *path,
     if(strcmp(path,canonical)||(!commit&&index<0)||(commit&&offset))
         return reply(out,400,"{\"error\":\"Invalid startup archive stream\"}");
     if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK)goto failure;
+    int deleted=sol_deleted_upload(db,device,boot,stage,0,offset,length,out);
+    if(deleted){
+        if(deleted==200&&sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)==SQLITE_OK)return deleted;
+        sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);free(*out);return reply(out,503,"{\"error\":\"Deletion cursor unavailable\"}");
+    }
     sqlite3_stmt *s=prepare(db,"INSERT OR IGNORE INTO startup_boots(device,boot,seen,peer) VALUES(?1,?2,?3,?4)",device,boot,NULL);
     if(!s)goto rollback;
     sqlite3_bind_int64(s,3,time(NULL));sqlite3_bind_text(s,4,peer,-1,SQLITE_TRANSIENT);

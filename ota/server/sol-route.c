@@ -2,6 +2,7 @@
 #include "sol-route.h"
 #include "sol.h"
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -14,8 +15,16 @@ bool sol_route_client(int client, const struct server_context *context,
     if (strncmp(request->path, "/api/sol/", 9))
         return false;
 
+    bool deleting=!strncmp(request->path,"/api/sol/records/",17);
+    if(deleting){
+        char expected[512];snprintf(expected,sizeof(expected),"http://%s",request->host?request->host:"");
+        if(strcmp(request->method,"DELETE")||!request->admin||!request->host||request->length||
+           (request->origin&&strcmp(request->origin,expected))){
+            http_json(client,403,"Forbidden","{\"error\":\"Invalid deletion origin or request\"}",false);return true;
+        }
+    }
     char body[4097], *response = NULL;
-    if (request->length > 4096 || request->expect || request->origin ||
+    if (request->length > 4096 || request->expect || (request->origin&&!deleting) ||
         (!strcmp(request->method, "POST") && !request->has_length)) {
         http_json(client, 400, "Bad Request", "{\"error\":\"Invalid SOL request\"}", request->head);
         return true;
