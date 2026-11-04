@@ -1,12 +1,14 @@
 /* Small read-only clock service over the existing management connection. */
 #define _POSIX_C_SOURCE 200809L
 #include "manager-time.h"
+#include "clock-control.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-bool manager_time_route(int client, const struct http_request *request)
+bool manager_time_route(int client, const struct server_context *context, const struct http_request *request)
 {
+    if(clock_control_route(client,context,request))return true;
     const char *prefix="/api/time/";
     if(strncmp(request->path,prefix,strlen(prefix)))return false;
     if(strcmp(request->method,"GET")&&!request->head){

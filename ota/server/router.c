@@ -160,7 +160,7 @@ void server_route_client(int client, const struct server_context *context)
         http_json(client, 400, "Bad Request", "{\"error\":\"Invalid request headers\"}", head);
         return;
     }
-    if (manager_time_route(client, &request))
+    if (manager_time_route(client, context, &request))
         return;
     if (sol_route_client(client, context, &request))
         return;

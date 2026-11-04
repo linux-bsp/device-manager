@@ -3,6 +3,7 @@
 #include "sol-forward.h"
 #include "startup-forward.h"
 #include "time-sync.h"
+#include "time-control.h"
 #include <curl/curl.h>
 #include <dirent.h>
 #include <errno.h>
@@ -22,7 +23,7 @@ static volatile sig_atomic_t stopped;
 static char server[512], device[64], key[65], interface[32]="eth0";
 static int clock_enabled;
 static const char *stages[]={"r5-spl","a53-spl","uboot","initramfs","kernel","services","events"};
-static void stop_forward(int sig){(void)sig;stopped=1;dm_time_sync_cancel();}
+static void stop_forward(int sig){(void)sig;stopped=1;dm_time_sync_cancel();dm_clock_cancel();}
 static int safe(const char *s){if(!*s||strlen(s)>63)return 0;for(;*s;s++)if(!((*s>='a'&&*s<='z')||(*s>='0'&&*s<='9')||*s=='-'||*s=='_'))return 0;return 1;}
 static int read_text(const char *p,char *buf,size_t cap)
 {
@@ -170,7 +171,7 @@ int sol_forward(const char *root)
     signal(SIGTERM,stop_forward);signal(SIGINT,stop_forward);signal(SIGPIPE,SIG_IGN);
     curl_global_init(CURL_GLOBAL_DEFAULT);int state=-1;
     while(!stopped){
-        if(clock_enabled)(void)dm_time_sync(server,interface,0);
+        if(clock_enabled)dm_clock_cycle(server,interface,device,key);
         if(stopped)break;
         int startup=startup_forward(device,post_path);
         int result=cycle(root);
@@ -185,6 +186,8 @@ int sol_sync_time(void)
 {
     if(config()){fprintf(stderr,"[logctl] [ERROR] valid SOL server configuration required for time sync\n");return 1;}
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    int result=dm_time_sync(server,interface,1);
+    char source[512]="-";int enabled=1;unsigned interval=3600;
+    (void)dm_clock_local(source,&enabled,&interval);dm_time_interval(interval);
+    int result=dm_time_sync(strcmp(source,"-")?source:server,interface,1);
     curl_global_cleanup();return result?1:0;
 }

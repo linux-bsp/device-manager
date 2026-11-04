@@ -173,3 +173,17 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
   h1 { font-size: 21px; }
   .device-detail dl { grid-template-columns: 1fr 1fr; }
 }
+
+.clock-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.clock-time { font-size: 20px; font-variant-numeric: tabular-nums; margin: 10px 0; overflow-wrap: anywhere; }
+.clock-layout { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: 20px; align-items: start; }
+.clock-details { display: grid; grid-template-columns: 110px minmax(0,1fr); gap: 13px; font-size: 13px; margin: 22px 0; }
+.clock-details dt { color: var(--muted,#6b7280); }
+.clock-details dd { margin: 0; overflow-wrap: anywhere; }
+.clock-form { display: grid; gap: 12px; margin-top: 20px; }
+.clock-form input:not([type=checkbox]), .clock-form select { width: 100%; min-width: 0; box-sizing: border-box; }
+.clock-checkbox { display: flex; align-items: center; gap: 8px; }
+#clock-device { max-width: 100%; }
+@media (max-width: 900px) { .clock-layout, .clock-metrics { grid-template-columns: minmax(0,1fr); } }
+.clock-form input:not([type=checkbox]) { padding: 10px 12px; border: 1px solid #cad8e5; border-radius: 8px; font: inherit; color: #193047; background: white; }
+.clock-form input:disabled { background: #f1f5f9; color: #64748b; }

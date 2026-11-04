@@ -89,6 +89,8 @@ static int authorized(const char *root,const char *device,const char *auth)
     unsigned diff=0;for(int i=0;i<64;i++)diff|=(unsigned char)key[i]^(unsigned char)auth[7+i];
     return !diff;
 }
+bool sol_access(const char *root,const char *device,const char *auth)
+{ return debug_no_auth||authorized(root,device,auth); }
 static sqlite3_stmt *statement(const char *sql,const char *device,const char *boot,const char *stage,long long gen)
 {
     sqlite3_stmt *s=NULL;if(sqlite3_prepare_v2(db,sql,-1,&s,NULL)!=SQLITE_OK)return NULL;

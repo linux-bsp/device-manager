@@ -82,4 +82,4 @@ SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` �
 
 执行 `make -C logging test` 验证日志生命周期；`python3 tests/test_firmware.py` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。
 
-设备支持从 Device Manager 自动校时并写入 RTC；启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。
+侧栏“时间同步”（`/#clock`）显示服务器/设备时间和校时状态，可配置外部 NTP 或 HTTP 时间源、周期，并发起立即校时。设备支持自动校时并写入 RTC；启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。

@@ -1,6 +1,6 @@
 # 设备校时与归档时间
 
-Device Manager 提供简易 HTTP 校时服务，复用现有管理端口（开发环境为 8090）。设备联网后由 logctld 的独立上传进程取时，不阻塞本地采集、启动健康检查或 OTA。标准 NTP 客户端不能直接使用这个 HTTP 接口。
+Device Manager 提供简易 HTTP 校时服务，复用现有管理端口（开发环境为 8090）。设备联网后由 logctld 的独立上传进程取时，不阻塞本地采集、启动健康检查或 OTA。标准 NTP 客户端不能直接使用这个 HTTP 接口。设备也支持从外部标准 NTP 服务器取时；管理服务不占用 UDP 123 端口。
 
 ## 设备行为
 
@@ -15,14 +15,14 @@ time-sync=1
 
 网卡 link UP 且有 IP 后进行三次带随机 nonce 的请求，选择往返延迟最小的有效样本，以半程延迟估算返回时刻。服务器时间必须在 2020–2099 年，纳秒字段和 nonce 必须匹配；超时、无效内容和重定向不会被用于设时。
 
-首次联网校时，随后每小时校正；检测到系统时间相对单调时间跳变超过两秒时提前重试，失败每 30 秒重试。偏差超过 100 ms 才调用 `clock_settime`。采样、重试和周期使用 CLOCK_BOOTTIME，不受日历时间调整影响；停止服务会取消正在进行的请求。
+首次联网校时，默认随后每小时校正（网页可设为 60–86400 秒）；检测到系统时间相对单调时间跳变超过两秒时提前重试，失败每 30 秒重试。偏差超过 100 ms 才调用 `clock_settime`。采样、重试和周期使用 CLOCK_BOOTTIME，不受日历时间调整影响；停止服务会取消正在进行的请求。
 
 校准成功后尝试把 UTC 写入 `/dev/rtc0`；`rtc-state=written` 仅说明写操作成功。内核开启 `CONFIG_RTC_HCTOSYS=y` 读取 RTC，但本板 AM625 片内 RTC 在软件复位后实测回到初始值，因此可靠来源是每次联网重新校准，不能宣称跨重启保时。RTC 写失败不撤销已成功的网络校时，状态会单独标记。
 
 TI 的 [AM625 硬件设计说明 SPRAD05E，第 7.11 节](https://www.ti.com/lit/ug/sprad05e/sprad05e.pdf) 说明片内 RTC 没有用于跨复位保时的独立供电，软件或外部冷/热复位可能使计时值复位。本轮不改变系统复位方式来绕过此硬件边界，也没有把复位后的 1970 年时间当作已校准时间。
 
 ```sh
-logctl sync-time       # 立即手工校时，使用上述 server/interface
+logctl sync-time       # 立即手工校时，优先使用已保存的时间源
 logctl status          # 查看校时状态、最近成功时间、延迟估计和 RTC 状态
 date -u
 cat /sys/class/rtc/rtc0/date
@@ -45,6 +45,30 @@ DMTIME1 <原nonce> <Unix秒> <纳秒>
 
 接口只读，禁用缓存；支持 HEAD，其他方法返回 405。服务器自身时间超出合理范围时返回 503。设备使用配置的管理服务器，不跟随重定向到其他时间源；沿用当前调试网络配置。
 
+## 网页时间状态与时间源配置
+
+打开 `http://<管理服务器>:8090/#clock`，侧栏选择“时间同步”。页面显示管理服务器时间、设备最近一次上报时的时间、实际协议、有效时间源、周期、最近成功校时、修正量、网络延迟估计和 RTC 状态。统一显示北京时间；设备时间是上报快照，不冒充持续读取的实时时钟。超过 30 秒没有回报标记为过期。
+
+时间源可选：
+
+- 当前 Device Manager：使用设备 `sol.conf` 中的 server，配置值 `-`。
+- 外部标准 NTP：如 `ntp://192.168.10.1:123`、`ntp://clock.example.org`，支持域名及 IPv4/IPv6，默认 UDP 123。
+- 外部 Device Manager：如 `http://192.168.10.2:8090` 或 HTTPS origin；必须提供上述 DMTIME1 接口，普通 HTTP 网站不适用。HTTPS 需要设备已有合理时间及受信 CA；本板复位后时钟可能回到 1970 年，建议用 NTP 或内网 HTTP 完成首次校时。
+
+保存配置同时触发一次校时，随后按所设周期运行；“立即校时”可用相同配置再次请求采样。关闭自动校时后设备仍接收配置与上报状态。源不可达时保留已有系统时间，显示失败；不会偷偷换用其他服务器。时间源配置不修改 OTA / SOL 的管理地址。
+
+后台先记录持久化请求，网页显示等待设备应用。只有设备实际返回后才显示完成或 errno；当前生效源单独来自设备回报，不能把期望配置当作已生效配置。设备离线时可先下发，联网后处理。服务端 `clock.db` 保存请求、首次结果与设备状态；重复回报不会覆盖首次结果。
+
+设备将源、启停、周期及已执行请求原子保存到 `/data/log/time-source.conf`（`LOGCTL_TIME_CONFIG` 可覆盖路径），对文件和目录做 fsync，进程重启/OTA 后继续使用。临时 RAM 文件系统不接受“持久化成功”；data 不可写时回报配置失败，保留原配置。启动时 `/etc/device-manager/sol.conf` 的 `time-sync=1` 启用该通道；未启用的旧配置不会被网页悄悄开启。
+
+`logctl sync-time` 优先读取持久化时间源，无配置时使用管理服务器。调用此显式命令可手动取时；网页“立即校时”目前要求启用自动校时。
+
+### 标准 NTP 采样边界
+
+内置客户端使用单播 SNTP，不增加另一个守护进程。按 [RFC 5905](https://www.rfc-editor.org/rfc/rfc5905.html) 检查服务端模式、版本、leap、stratum、随机请求时间戳回显及接收/发送时间；拒绝未同步、KoD、截断、错配和异常时间响应。处理 NTP 2036 年 era 回绕，仅接受 2020–2099 年。三次采样取最短往返延迟，并扣除服务器处理时间。每次 UDP 收包等待最多 2 秒，可取消；域名解析使用系统解析器的超时策略。本功能用于联网后日历时间校准，不是完整 NTP 驯服算法或高精度 PTP 服务。
+
+接口：`GET /api/clock` 查询时间状态；`POST /api/clock/config/<device>` 保存配置；设备 `GET/POST /api/clock/device/<device>` 拉取/确认。配置与报告是有界文本协议，不经 SOL 发送命令或执行 shell。沿用现有调试免凭据策略；普通模式复用设备/查看者凭据验证。
+
 ## 归档日志名
 
 Web 的启动归档列表和下载文件使用服务器数据库中不可变的首次接收时间，按北京时间（+08:00）显示，示例：
@@ -60,4 +84,4 @@ Web 的启动归档列表和下载文件使用服务器数据库中不可变的�
 
 ## 验证
 
-`python3 logging/tests/test_time_sync.py` 用进程内拦截的时钟和 RTC 测试客户端，始终不修改测试主机时间。`python3 ota/tests/test-manager-time.py` 检查真实 HTTP 服务；`node --test ota/tests/test-sol-names.cjs` 检查固定接收时间、同秒记录和时区。实机验收单独记录在 workspace 的 `docs/am62x/`。
+`python3 logging/tests/test_time_sources.py` 覆盖 NTP 包、外部源及配置持久化；`python3 ota/tests/test-clock-control.py` 检查请求与回报。`python3 logging/tests/test_time_sync.py` 用进程内拦截的时钟和 RTC 测试客户端，始终不修改测试主机时间。`python3 ota/tests/test-manager-time.py` 检查真实 HTTP 服务；`node --test ota/tests/test-sol-names.cjs` 检查固定接收时间、同秒记录和时区。实机验收单独记录在 workspace 的 `docs/am62x/`。

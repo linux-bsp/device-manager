@@ -12,6 +12,7 @@ for marker, filename in (
     ("/* INLINE_SOL_NAMES */", "sol-names.js"),
     ("/* INLINE_APP */", "app.js"),
     ("/* INLINE_FLEET */", "fleet.js"),
+    ("/* INLINE_CLOCK */", "clock.js"),
 ):
     assert page.count(marker) == 1, marker
     page = page.replace(marker, (web / filename).read_text())

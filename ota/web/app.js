@@ -249,16 +249,16 @@ setInterval(async()=>{if(sol.active&&location.hash==='#sol')try{const rows=await
 function restoreTab(){
  const detail=location.pathname==='/firmware';
  const route=detail?'firmware':location.hash.slice(1)||'dashboard';
- const dashboard=route==='dashboard',devices=route==='devices',sol=route==='sol';
+ const dashboard=route==='dashboard',devices=route==='devices',sol=route==='sol',clock=route==='clock';
  $('dashboard-panel').hidden=!dashboard||detail;$('devices-panel').hidden=!devices||detail;
- $('sol-panel').hidden=!sol||detail;$('overview').hidden=dashboard||devices||sol||detail;
- const pages={dashboard:['总览','设备状态、固件发布与最近事件。'],devices:['设备','固件身份、网络信息与升级结果。'],sol:['远程日志 SOL','只读启动日志与历史回放。']};
+ $('clock-panel').hidden=!clock||detail;$('sol-panel').hidden=!sol||detail;$('overview').hidden=dashboard||devices||sol||clock||detail;
+ const pages={clock:['时间同步','时间状态、NTP / HTTP 时间源与远程校准。'],dashboard:['总览','设备状态、固件发布与最近事件。'],devices:['设备','固件身份、网络信息与升级结果。'],sol:['远程日志 SOL','只读启动日志与历史回放。']};
  const [title,description]=pages[route]||['固件 OTA','上传固件、发布版本并追踪升级结果。'];
  $('module-title').textContent=detail?'固件详情':title;$('module-description').textContent=detail?'版本内容、下载量与设备升级统计。':description;
- for(const id of ['dashboard','devices','ota','sol'])$('module-'+id).setAttribute('aria-current',(!detail&&((id===route)||(id==='ota'&&!pages[route])))||(detail&&id==='ota')?'page':'false');
+ for(const id of ['dashboard','devices','ota','sol','clock'])$('module-'+id).setAttribute('aria-current',(!detail&&((id===route)||(id==='ota'&&!pages[route])))||(detail&&id==='ota')?'page':'false');
  selectTab(tabs.find(t=>t.dataset.tab===location.hash.slice(1))||tabs[0],false);
 }
 window.addEventListener('hashchange',restoreTab);restoreTab();
 document.querySelectorAll('[data-refresh]').forEach(b=>b.onclick=()=>state().catch(e=>notice(e.message,true)));
-$('header-refresh').onclick=()=>state().catch(e=>notice(e.message,true));
+$('header-refresh').onclick=()=>{if(location.hash==='#clock')clockRefresh().catch(e=>notice(e.message,true));else state().catch(e=>notice(e.message,true));};
 state().catch(e=>{notice(e.message,true);$('service-health').textContent='管理服务不可用';$('service-health').classList.add('error');});

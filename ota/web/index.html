@@ -16,12 +16,31 @@
 <a id="module-dashboard" href="/#dashboard" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>总览</a>
 <a id="module-devices" href="/#devices"><span class="nav-icon" aria-hidden="true">▣</span>设备</a>
 <a id="module-ota" href="/#manage"><span class="nav-icon" aria-hidden="true">⬆</span>固件 OTA</a>
+<a id="module-clock" href="/#clock"><span class="nav-icon" aria-hidden="true">◷</span>时间同步</a>
 <a id="module-sol" href="/#sol"><span class="nav-icon" aria-hidden="true">⌁</span>远程日志 SOL</a>
 </nav>
 <div class="sidebar-footer"><strong>管理节点</strong><br>固件发布 · 升级审计 · 启动日志</div>
 </aside>
 <div class="workspace"><header><div><span>DEVICE MANAGER / 控制台</span><h1 id="module-title">总览</h1><p id="module-description">设备状态、固件发布与最近事件。</p></div><div class="header-actions"><span id="service-health" class="service-health">管理服务已连接</span><button id="header-refresh" class="secondary small" type="button">刷新数据</button></div></header>
 <main>
+<section id="clock-panel" hidden>
+<div class="metric-grid clock-metrics">
+<div class="metric"><div class="metric-label">管理服务器时间 · 北京时间</div><div id="clock-server-time" class="clock-time">—</div><div class="metric-hint">基于服务器最近一次响应推算</div></div>
+<div class="metric"><div class="metric-label">设备上报时间 · 北京时间</div><div id="clock-device-time" class="clock-time">—</div><div id="clock-time-hint" class="metric-hint">选择设备查看</div></div>
+</div>
+<div class="clock-layout"><section class="card"><div class="section-head"><div><h2>设备校时状态</h2><p class="muted">只显示设备实际回报；网页本机时间不作为设备时间源。</p></div><button id="clock-refresh" class="secondary" type="button">刷新</button></div>
+<div class="toolbar"><label for="clock-device">设备</label><select id="clock-device"></select><span id="clock-online" class="pill">待获取</span></div>
+<dl id="clock-status" class="clock-details"></dl><p id="clock-request-status" class="muted" role="status"></p>
+<p class="muted">RTC 写入成功仅代表本次写操作；AM625 片内 RTC 不能保证跨复位保时。最近修正量是校准前偏差，不是当前剩余误差。</p>
+</section><section class="card"><h2>时间源与校准</h2><p class="muted">时间源独立于 OTA / SOL 管理服务器。保存配置后由设备拉取并持久化。</p>
+<form id="clock-form" class="clock-form">
+<label for="clock-source-type">时间源类型</label><select id="clock-source-type"><option value="manager">当前 Device Manager（HTTP）</option><option value="ntp">标准 NTP（UDP）</option><option value="http">其他 Device Manager（HTTP / HTTPS）</option></select>
+<label for="clock-source">服务器地址</label><input id="clock-source" type="text" placeholder="ntp://192.168.10.1:123" maxlength="511" spellcheck="false"><span id="clock-source-help" class="muted"></span>
+<label for="clock-interval">自动校时间隔（秒）</label><input id="clock-interval" type="number" min="60" max="86400" step="1" value="3600" required>
+<label class="clock-checkbox"><input id="clock-enabled" type="checkbox" checked> 启用自动校时</label>
+<div class="toolbar"><button id="clock-save" type="submit">保存并下发</button><button id="clock-sync" type="button" class="secondary">立即校时</button></div>
+<p id="clock-message" role="status" class="muted">尚未修改配置。</p>
+</form></section></div></section>
 <section id="sol-panel" class="card" hidden>
 <h2>SOL 启动日志</h2><p class="muted">只读实时日志与历史回放。设备网络恢复后补传已采集的启动日志；不提供远程命令输入。</p>
 <div id="sol-auth" class="toolbar" hidden><label for="sol-key">查看凭据</label><input id="sol-key" type="password" autocomplete="off" placeholder="输入服务端 sol-keys/viewer 中的凭据"><button id="sol-connect">连接</button><button id="sol-disconnect" class="secondary">断开</button></div>
@@ -83,6 +102,7 @@
 /* INLINE_SOL_NAMES */
 /* INLINE_APP */
 /* INLINE_FLEET */
+/* INLINE_CLOCK */
 </script>
 </body>
 </html>

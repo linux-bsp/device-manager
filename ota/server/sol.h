@@ -9,6 +9,7 @@ int sol_request(const char *root, const char *method, const char *path,
 struct ota_report;
 int sol_ota_event(const char *root, const struct ota_report *report, const char *observed_boot);
 int sol_enroll(int argc, char **argv);
+bool sol_access(const char *root, const char *device, const char *authorization);
 void sol_set_open_view(bool enabled);
 void sol_set_debug_no_auth(bool enabled);
 #endif

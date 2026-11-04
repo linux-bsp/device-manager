@@ -1,6 +1,7 @@
 /* LAN clock calibration, independent of local collection and OTA installation. */
 #define _GNU_SOURCE
 #include "time-sync.h"
+#include "../ota/shared/time-source.h"
 #include <arpa/inet.h>
 #include <curl/curl.h>
 #include <errno.h>
@@ -29,7 +30,9 @@ static int progress(void *p,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d)
 {(void)p;(void)a;(void)b;(void)c;(void)d;return cancelled?1:0;}
 static char last_rtc[24]="unavailable";
 struct response {char data[160];size_t length;};
-struct sample {int64_t wall,end,rtt;};
+static unsigned sync_interval=3600;
+static char previous_source[512];
+void dm_time_interval(unsigned seconds){sync_interval=seconds;}
 static int64_t now_ns(clockid_t clock)
 {
     struct timespec t;if(clock_gettime(clock,&t))return -1;
@@ -52,7 +55,7 @@ static int random_nonce(char nonce[33])
     }
     close(fd);for(int i=0;i<16;i++)snprintf(nonce+i*2,3,"%02x",bytes[i]);return 0;
 }
-static int request_sample(const char *server,struct sample *sample)
+static int request_http_sample(const char *server,struct dm_time_sample *sample)
 {
     char nonce[33],returned[33],url[1024];int ret=random_nonce(nonce);if(ret)return ret;
     if(snprintf(url,sizeof(url),"%s/api/time/%s",server,nonce)>=(int)sizeof(url))return -ENAMETOOLONG;
@@ -96,7 +99,7 @@ static void status_file(const char *state,const char *server,long long offset,lo
 {
     char path[1024],temp[1024];if(state_path(path,sizeof(path),"clock-status")||state_path(temp,sizeof(temp),".clock-status.tmp"))return;
     int fd=open(temp,O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC|O_NOFOLLOW,0600);if(fd<0)return;
-    int ret=dprintf(fd,"clock-state=%s\nclock-source=device-manager\nclock-server=%s\nclock-synced-at=%lld\nclock-offset-ms=%lld\nclock-uncertainty-ms=%lld\nrtc-state=%s\n",state,server,(long long)last_sync,offset,uncertainty,last_rtc);
+    int ret=dprintf(fd,"clock-state=%s\nclock-source=%s\nclock-server=%s\nclock-synced-at=%lld\nclock-offset-ms=%lld\nclock-uncertainty-ms=%lld\nrtc-state=%s\n",state,!strncmp(server,"ntp://",6)?"ntp":"device-manager",server,(long long)last_sync,offset,uncertainty,last_rtc);
     int failed=ret<0||fsync(fd);if(close(fd))failed=1;
     if(failed||rename(temp,path))unlink(temp);
 }
@@ -110,8 +113,14 @@ static void persist_rtc(void)
     rtc.tm_mday=utc.tm_mday;rtc.tm_mon=utc.tm_mon;rtc.tm_year=utc.tm_year;rtc.tm_wday=utc.tm_wday;rtc.tm_yday=utc.tm_yday;
     strcpy(last_rtc,ioctl(fd,RTC_SET_TIME,&rtc)?"write-failed":"written");close(fd);
 }
+void dm_time_disabled(const char *source)
+{ status_file("disabled",source,0,0); }
 int dm_time_sync(const char *server,const char *interface,int force)
 {
+    if(!dm_source_valid(server)||!strcmp(server,"-"))return -EINVAL;
+    if(strcmp(previous_source,server)){
+        strcpy(previous_source,server);next_attempt=last_sync=anchor_wall=anchor_mono=0;warned=last_state=0;
+    }
     if(cancelled)return -ECANCELED;
     int64_t mono=now_ns(CLOCK_BOOTTIME),wall=now_ns(CLOCK_REALTIME);
     if(mono<0||wall<0)return -EIO;
@@ -125,9 +134,9 @@ int dm_time_sync(const char *server,const char *interface,int force)
     char path[1024];if(state_path(path,sizeof(path),".clock-lock"))return -ENAMETOOLONG;
     int lock=open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0600);if(lock<0)return -errno;
     if(flock(lock,LOCK_EX|LOCK_NB)){close(lock);return -EAGAIN;}
-    struct sample best={.rtt=INT64_MAX};int error=-EHOSTUNREACH;
+    struct dm_time_sample best={.rtt=INT64_MAX};int error=-EHOSTUNREACH;
     for(int i=0;i<3&&!cancelled;i++){
-        struct sample sample;int ret=request_sample(server,&sample);
+        struct dm_time_sample sample;int ret=!strncmp(server,"ntp://",6)?dm_ntp_sample(server,&sample,&cancelled):request_http_sample(server,&sample);
         if(!ret&&sample.rtt<best.rtt)best=sample;
         else if(ret)error=ret;
     }
@@ -141,10 +150,10 @@ int dm_time_sync(const char *server,const char *interface,int force)
         else {
             anchor_wall=now_ns(CLOCK_REALTIME);anchor_mono=now_ns(CLOCK_BOOTTIME);last_sync=anchor_wall/NS;
             persist_rtc();status_file("synchronized",server,offset/1000000,(best.rtt+1999999)/2000000);
-            next_attempt=anchor_mono+3600*NS;last_state=2;warned=0;
+            next_attempt=anchor_mono+(int64_t)sync_interval*NS;last_state=2;warned=0;
             char when[40];time_t seconds=(time_t)last_sync;struct tm utc;
             gmtime_r(&seconds,&utc);strftime(when,sizeof(when),"%Y-%m-%dT%H:%M:%SZ",&utc);
-            fprintf(stderr,"[logctld] [INFO] time synchronized: %s source=device-manager rtc=%s\n",when,last_rtc);
+            fprintf(stderr,"[logctld] [INFO] time synchronized: %s source=%s rtc=%s\n",when,server,last_rtc);
             close(lock);return 0;
         }
     }
