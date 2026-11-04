@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define DM_FW_OPEN_F_VALID 0U
@@ -581,6 +582,17 @@ int32_t dm_fw_update(int handle,
 	if (ret)
 		return ret;
 	ret = dm_fw_storage_open(value, true, &storage);
+    if (!ret) {
+        struct stat st;
+        if (fstat(storage.fd, &st)) ret = -errno;
+        else if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
+            struct fw_metadata metadata;
+            uint32_t booted;
+            ret = dm_fw_get_booted_deployment(&booted);
+            if (!ret) ret = fw_metadata_load(&storage, &metadata);
+            if (!ret) ret = fw_metadata_check_update_source(&metadata, booted);
+        }
+    }
 	if (!ret)
 		ret = fw_update_release(&value->layout, &storage,
 					params->source, params->component,

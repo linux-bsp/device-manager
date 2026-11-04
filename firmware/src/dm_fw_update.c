@@ -7,6 +7,25 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+static int write_region(struct fw_storage *storage, const struct fw_region *region,
+                         const void *data, size_t size)
+{
+    int claim = -1;
+    if (storage->fd >= 0) {
+        struct stat st;
+        if (fstat(storage->fd, &st)) return -errno;
+        if (S_ISBLK(st.st_mode)) {
+            int ret = fw_storage_claim_region(storage, region, &claim);
+            if (ret) return ret;
+        }
+    }
+    int ret = fw_storage_write_region(storage, region, data, size);
+    if (claim >= 0) close(claim);
+    return ret;
+}
 
 static void report_progress(dm_fw_progress_fn progress, void *userdata,
                             enum dm_fw_progress_event event,
@@ -50,7 +69,7 @@ static int write_bootloader(const struct fw_layout *layout,
                                         images[i].name, &data, &size);
         if (ret)
             return ret;
-        ret = fw_storage_write_region(
+        ret = write_region(
             storage, &layout->region[images[i].region_a + slot], data, size);
         if (ret)
             return ret;
@@ -71,7 +90,7 @@ static int write_component(const struct fw_layout *layout,
     uint8_t target;
     int ret;
 
-    current = &metadata->deployment[deployment]
+    current = &metadata->deployment[1U - deployment]
                    .component[package->component];
     target = 1U - current->slot;
     if (package->rollback_index < current->rollback_index)
@@ -88,7 +107,7 @@ static int write_component(const struct fw_layout *layout,
                                             target);
         if (!region)
             return -ENOENT;
-        ret = fw_storage_write_region(storage, region, data, size);
+        ret = write_region(storage, region, data, size);
     }
     if (ret)
         return ret;
@@ -115,6 +134,8 @@ int fw_update_release(const struct fw_layout *layout,
     unsigned int matched = 0;
     int ret;
 
+    if (component > DM_FW_COMPONENT_COUNT) return -EINVAL;
+
     ret = fw_source_get_release(layout, release_source, &release_artifact);
     if (ret)
         return ret;
@@ -124,13 +145,27 @@ int fw_update_release(const struct fw_layout *layout,
     ret = fw_fit_verify_release(layout, &release_fit, &release);
     if (ret)
         goto out_release_fit;
+    /* Reject an absent component or prohibited bootloader before metadata is
+     * changed. A rejected request must not invalidate an existing candidate. */
+    for (i = 0; i < release.count; i++) {
+        if (component != DM_FW_UPDATE_COMPONENT_ALL && component != release.component[i].component + 1U) continue;
+        if (release.component[i].component == FW_COMPONENT_BOOTLOADER &&
+            (!layout->allow_bootloader_update || !release.allow_bootloader)) {
+            ret = -EPERM; goto out_release_fit;
+        }
+        ++matched;
+    }
+    if (!matched) { ret = -ENOENT; goto out_release_fit; }
     ret = fw_metadata_load(storage, &metadata);
     if (ret)
         goto out_release_fit;
-    ret = fw_metadata_begin_release(&metadata, release.version,
-                                    &deployment);
+    ret = component == DM_FW_UPDATE_COMPONENT_ALL ?
+        fw_metadata_begin_release(&metadata, release.version, &deployment) :
+        fw_metadata_begin_component(&metadata, component - 1U, &deployment);
     if (ret)
         goto out_release_fit;
+    if (component != DM_FW_UPDATE_COMPONENT_ALL && component != FW_COMPONENT_BOOTLOADER + 1U)
+        metadata.deployment[deployment].release_version = release.version;
 
     /* Persist a non-bootable transaction before any target region changes. */
     ret = fw_metadata_save(storage, &metadata);
@@ -149,14 +184,6 @@ int fw_update_release(const struct fw_layout *layout,
         if (component != DM_FW_UPDATE_COMPONENT_ALL &&
             component != item->component + 1U)
             continue;
-        matched++;
-
-        if (item->component == FW_COMPONENT_BOOTLOADER &&
-            (!layout->allow_bootloader_update ||
-             !release.allow_bootloader)) {
-            ret = -EPERM;
-            goto out_release_fit;
-        }
         ret = fw_source_get_component(layout, release_source, item->file,
                                       &component_artifact);
         if (ret)
@@ -189,11 +216,6 @@ int fw_update_release(const struct fw_layout *layout,
                         release.version,
                         package.version, 0);
         fw_source_put(&component_artifact);
-    }
-
-    if (component != DM_FW_UPDATE_COMPONENT_ALL && !matched) {
-        ret = -ENOENT;
-        goto out_release_fit;
     }
 
     if (component == DM_FW_UPDATE_COMPONENT_ALL) metadata.deployment[deployment].identity = release.identity;

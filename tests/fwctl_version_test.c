@@ -15,11 +15,16 @@ static const char *image_info;
 static int identity_available, dt_available, dt_mismatch, dt_hash_mismatch;
 static const char identity_id[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static const char *identity_tag = "v1.0.0";
+static const char *expected_source;
+static uint32_t expected_component;
+static const char update_config[] = "update-protocol=http\nupdate-server=192.168.10.246:8090\nupdate-path=firmware\nupdate-release=release.itb\n";
 
 
 FILE *__real_fopen(const char *path, const char *mode);
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
+    if (!strcmp(path, "/test/firmware.conf"))
+        return fmemopen((void *)update_config, strlen(update_config), "r");
     if (!strcmp(path, "/etc/ota-release")) {
         if (!image_info) {
             errno = ENOENT;
@@ -106,7 +111,9 @@ int32_t dm_fw_initialize(dm_fw_handle_t h, uint32_t slot)
 }
 int32_t dm_fw_update(dm_fw_handle_t h, const struct dm_fw_update_params *params)
 {
-    (void)h; (void)params; mutations++; return -ENOSYS;
+    assert(h == 7 && expected_source && !strcmp(params->source, expected_source));
+    assert(params->component == expected_component && params->progress);
+    mutations++; return -ENOSYS;
 }
 int32_t dm_fw_mark_good(dm_fw_handle_t h, int32_t deployment)
 {
@@ -277,6 +284,33 @@ int main(void)
     assert(capture(text, 0) == -ENODATA && !*text);
     status_error = -EIO;
     assert(capture(text, 0) == -EIO && !*text);
-    puts("fwctl version: booted deployment, pending/rollback, image fallback and read-only checks passed");
+    struct fwctl_options options = {.config = "/test/firmware.conf"};
+    char *component_source[] = {"kernel", "/cache/release.itb"};
+    char *all_source[] = {"all", "https://example.test/release.itb"};
+    char *source_only[] = {"./release.itb"};
+    char *component_only[] = {"rootfs"};
+    struct { int argc; char **argv; const char *source; uint32_t component; } cases[] = {
+        {2, component_source, "/cache/release.itb", DM_FW_COMPONENT_KERNEL + 1},
+        {2, all_source, "https://example.test/release.itb", DM_FW_UPDATE_COMPONENT_ALL},
+        {1, source_only, "./release.itb", DM_FW_UPDATE_COMPONENT_ALL},
+        {1, component_only, "http://192.168.10.246:8090/firmware/release.itb", DM_FW_COMPONENT_ROOTFS + 1},
+        {0, NULL, "http://192.168.10.246:8090/firmware/release.itb", DM_FW_UPDATE_COMPONENT_ALL},
+    };
+    for (unsigned i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        expected_source = cases[i].source; expected_component = cases[i].component;
+        int old_mutations = mutations;
+        assert(fwctl_run_firmware(&options, "update", cases[i].argc, cases[i].argv) == -ENOSYS);
+        assert(mutations == old_mutations + 1 && opens == closes);
+    }
+    old_opens = opens;
+    int old_mutations = mutations;
+    char *unknown[] = {"kernal", "/cache/release.itb"};
+    char *empty[] = {"kernel", ""};
+    char *three[] = {"all", "release.itb", "ignored"};
+    assert(fwctl_run_firmware(&options, "update", 2, unknown) == -EINVAL);
+    assert(fwctl_run_firmware(&options, "update", 2, empty) == -EINVAL);
+    assert(fwctl_run_firmware(&options, "update", 3, three) == -EINVAL);
+    assert(opens == old_opens && mutations == old_mutations);
+    puts("fwctl: running identity and update argument/routing checks passed");
     return 0;
 }

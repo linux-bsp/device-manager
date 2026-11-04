@@ -13,7 +13,7 @@ struct fwctl_options {
 };
 
 int fwctl_resolve_update(const struct fwctl_options *options,
-                         const char *argument, char *source,
+                         int argc, char **argv, char *source,
                          size_t source_size, uint32_t *component);
 
 int fwctl_build_open_params(const struct fwctl_options *options,

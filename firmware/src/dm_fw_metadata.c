@@ -335,6 +335,46 @@ restore_sequence:
     return ret;
 }
 
+int fw_metadata_check_update_source(const struct fw_metadata *metadata, uint32_t booted)
+{
+    if (!metadata || booted > 1 || booted != metadata->active_deployment)
+        return -EBUSY;
+    const struct fw_deployment *source = &metadata->deployment[booted];
+    return source->successful && source->state == FW_STATE_CONFIRMED &&
+        fw_deployment_is_valid(source) ? 0 : -EBUSY;
+}
+
+int fw_metadata_begin_component(struct fw_metadata *metadata,
+    enum fw_component component, uint8_t *deployment)
+{
+    if (!metadata || !deployment || component >= FW_COMPONENT_COUNT ||
+        metadata->active_deployment > 1 || metadata->last_good_deployment > 1) return -EINVAL;
+    uint8_t source_id = metadata->active_deployment;
+    struct fw_deployment *source = &metadata->deployment[source_id];
+    if (!source->successful || !fw_deployment_is_valid(source)) {
+        source_id = metadata->last_good_deployment;
+        source = &metadata->deployment[source_id];
+    }
+    if (!source->successful || source->state != FW_STATE_CONFIRMED ||
+        !fw_deployment_is_valid(source)) return -ENOENT;
+    uint8_t target_id = 1U - source_id;
+    struct fw_deployment *target = &metadata->deployment[target_id];
+    if (metadata->pending_deployment != FW_SLOT_NONE) {
+        if (metadata->pending_deployment != target_id || target->state != FW_STATE_READY ||
+            !fw_deployment_is_valid(target)) return -EBUSY;
+    } else *target = *source;
+    target->state = FW_STATE_WRITING;
+    target->tries_remaining = 0;
+    target->successful = 0;
+    if (component != FW_COMPONENT_BOOTLOADER) memset(&target->identity, 0, sizeof(target->identity));
+    metadata->pending_deployment = FW_SLOT_NONE;
+    metadata->boot_once_deployment = FW_SLOT_NONE;
+    metadata->selected_deployment = source_id;
+    metadata->update_state = FW_STATE_WRITING;
+    *deployment = target_id;
+    return 0;
+}
+
 int fw_metadata_begin_release(struct fw_metadata *metadata,
                               uint32_t release_version,
                               uint8_t *deployment)
@@ -344,7 +384,8 @@ int fw_metadata_begin_release(struct fw_metadata *metadata,
     uint8_t source_id;
     uint8_t target_id;
 
-    if (!metadata || !release_version || !deployment)
+    if (!metadata || !release_version || !deployment ||
+        metadata->active_deployment > 1 || metadata->last_good_deployment > 1)
         return -EINVAL;
     source_id = metadata->active_deployment;
     source = &metadata->deployment[source_id];
@@ -426,7 +467,7 @@ int fw_metadata_mark_good(struct fw_metadata *metadata, int deployment)
     if (deployment < 0 || deployment > 1)
         return -EINVAL;
     target = &metadata->deployment[deployment];
-    if (!fw_deployment_is_valid(target))
+    if (target->state == FW_STATE_WRITING || !fw_deployment_is_valid(target))
         return -EINVAL;
     target->state = FW_STATE_CONFIRMED;
     target->successful = 1;

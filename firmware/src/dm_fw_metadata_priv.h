@@ -83,6 +83,10 @@ DM_FW_INTERNAL int fw_metadata_save(struct fw_storage *storage,
 DM_FW_INTERNAL int fw_metadata_begin_release(struct fw_metadata *metadata,
                                               uint32_t release_version,
                                               uint8_t *deployment);
+DM_FW_INTERNAL int fw_metadata_begin_component(struct fw_metadata *metadata,
+    enum fw_component component, uint8_t *deployment);
+DM_FW_INTERNAL int fw_metadata_check_update_source(const struct fw_metadata *metadata,
+    uint32_t booted);
 DM_FW_INTERNAL int fw_metadata_stage_component(
     struct fw_metadata *metadata, uint8_t deployment,
     enum fw_component component, uint8_t slot, uint32_t version,

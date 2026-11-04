@@ -26,7 +26,7 @@ static int component_from_name(const char *name, uint32_t *component)
 }
 
 int fwctl_resolve_update(const struct fwctl_options *options,
-                         const char *argument, char *source,
+                         int argc, char **argv, char *source,
                          size_t source_size, uint32_t *component)
 {
 	FILE *file;
@@ -36,13 +36,18 @@ int fwctl_resolve_update(const struct fwctl_options *options,
 	char path[256] = "";
 	char release[128] = "release.itb";
 	const char *value;
+	const char *argument = NULL;
 
-	if (!options || !source || !source_size || !component)
+	if (!options || !source || !source_size || !component || argc < 0 || argc > 2 ||
+        (argc && (!argv || !argv[0] || !argv[0][0])) ||
+        (argc == 2 && (!argv[1] || !argv[1][0])))
 		return -EINVAL;
 	*component = DM_FW_UPDATE_COMPONENT_ALL;
-	if (argument && (!strcmp(argument, "all") ||
-	                 !component_from_name(argument, component)))
-		argument = NULL;
+	if (argc) {
+        int named = !strcmp(argv[0], "all") || !component_from_name(argv[0], component);
+        if (argc == 2 && !named) return -EINVAL;
+        argument = argc == 2 ? argv[1] : named ? NULL : argv[0];
+    }
 	if (argument && (strstr(argument, "://") || strchr(argument, '/') ||
 	                 strstr(argument, ".itb"))) {
 		if (snprintf(source, source_size, "%s", argument) >= (int)source_size)
@@ -529,6 +534,16 @@ int fwctl_run_firmware(const struct fwctl_options *options,
 	if (!strcmp(command, "version"))
 		return argc ? -EINVAL : print_running_version(options);
 
+    char source[512];
+    if (!strcmp(command, "update")) {
+        memset(&update_params, 0, sizeof(update_params));
+        ret = fwctl_resolve_update(options, argc, argv, source, sizeof(source),
+                                    &update_params.component);
+        if (ret) return ret;
+        update_params.source = source;
+        update_params.progress = update_progress;
+    }
+
 	ret = fwctl_build_open_params(options, &open_params);
 	if (ret)
 		return ret;
@@ -548,16 +563,7 @@ int fwctl_run_firmware(const struct fwctl_options *options,
 		if (!ret)
 			print_status(&status);
 	} else if (!strcmp(command, "update")) {
-		memset(&update_params, 0, sizeof(update_params));
-		char source[512];
-		uint32_t component = 0;
-		ret = argc <= 1 ? fwctl_resolve_update(options, argc ? argv[0] : NULL,
-						 source, sizeof(source), &component) : -EINVAL;
-		update_params.source = ret ? NULL : source;
-		update_params.component = component;
-		update_params.progress = update_progress;
-		if (!ret)
-			ret = dm_fw_update(handle, &update_params);
+        ret = dm_fw_update(handle, &update_params);
 	} else if (!strcmp(command, "mark-good")) {
 		if (argc > 1)
 			ret = -EINVAL;

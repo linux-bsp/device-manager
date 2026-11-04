@@ -56,9 +56,31 @@ component stages all components. A local file or complete URL may still be
 provided as the final argument for one-off updates. The command downloads or opens the release FIT, matches the complete device HWID against its `fw,hwids`
 allowlist, verifies the manifest and component hashes, checks version and
 rollback policy, and writes each component to the inactive physical slot.
+Examples:
+
+```sh
+fwctl update /data/fwctld/1010001000110000/60/release.itb
+fwctl update kernel /mnt/package/release.itb
+fwctl update rootfs https://server.example/firmware/release.itb
+```
+
+Manual component updates preserve previously staged components in a READY
+candidate. Repeating a component always writes the physical slot opposite the
+confirmed source, so it cannot flip back onto the running slot. An absent
+component or prohibited bootloader request fails before changing metadata.
+Use a complete release for normal OTA: individually mixed kernel/rootfs packages
+may fail the kernel-bound rootfs check. Only a complete release establishes the
+aggregate OS content identity.
+
 The target deployment is persisted as non-bootable `writing` before any
 component write. It becomes `ready` and `pending` only after every write and
 readback succeeds. The command does not reboot the system.
+
+On physical storage, updates require the actually booted deployment to be the
+confirmed active source. A boot-testing or boot-once system must pass health
+confirmation before another update. Block writes also hold an exclusive kernel
+claim on each target partition through readback; mounted partitions and device
+mapper holders cause refusal. A WRITING candidate cannot be marked good.
 
 For URL releases, component paths are resolved relative to the release URL.
 HTTP, HTTPS, and TFTP are accepted. An HTTPS request may redirect only to
