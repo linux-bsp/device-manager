@@ -4,6 +4,7 @@
 #include "sol-startup.h"
 #include "sol-delete.h"
 #include "sol-startup-evidence.h"
+#include "sol-retention.h"
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -77,7 +78,7 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db)||sol_startup_evidence_schema(db))return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db)||sol_startup_evidence_schema(db)||sol_retention_schema(db))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
 }
 int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)
@@ -144,7 +145,7 @@ int sol_request(const char *root,const char *method,const char *path,const char 
     }
     if(!strncmp(path,"/api/sol/push/",14)) {
         if(strcmp(method,"POST")||sscanf(path,"/api/sol/push/%63[^/]/%63[^/]/%lld/%63[^/]/%lld/%lld%c",device,boot,&order,stage,&gen,&offset,&extra)!=6||
-           !identifier(device)||!strcmp(device,"viewer")||!identifier(boot)||order<1||gen<0||offset<0||offset>4*1024*1024||length>4096)
+           !identifier(device)||!strcmp(device,"viewer")||!identifier(boot)||order<1||gen<0||offset<0||offset>4*1024*1024||length>4096||length>(size_t)(4*1024*1024-offset))
             return reply(out,400,"{\"error\":\"Invalid log batch\"}");
         snprintf(canonical,sizeof(canonical),"/api/sol/push/%s/%s/%lld/%s/%lld/%lld",device,boot,order,stage,gen,offset);
         if(strcmp(path,canonical)||(!stage_valid(stage)&&strcmp(stage,"meta")))return reply(out,400,"{\"error\":\"Invalid stream\"}");
@@ -179,12 +180,7 @@ int sol_request(const char *root,const char *method,const char *path,const char 
             }else if(length)status=409; /* Lost ACK or stale client: return durable cursor. */
         }
         if(sol_evidence_capture(db,device,boot))goto fail;
-        s=statement("DELETE FROM boots WHERE device=?1 AND boot NOT IN(SELECT boot FROM boots WHERE device=?1 ORDER BY rowid DESC LIMIT 4)",device,NULL,NULL,-1);
-        if(finish(s))goto fail;
-        s=statement("DELETE FROM streams WHERE device=?1 AND boot=?2 AND stage=?3 AND gen NOT IN(SELECT gen FROM streams WHERE device=?1 AND boot=?2 AND stage=?3 ORDER BY gen DESC LIMIT 4)",device,boot,stage,-1);
-        if(finish(s))goto fail;
-        s=statement("DELETE FROM chunks WHERE device=?1 AND id NOT IN(SELECT id FROM chunks WHERE device=?1 ORDER BY id DESC LIMIT 2048)",device,NULL,NULL,-1);
-        if(finish(s)||sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)!=SQLITE_OK)goto fail;
+        if(sol_retention_apply(db,device,boot,stage,gen)||sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)!=SQLITE_OK)goto fail;
         char response[96];snprintf(response,sizeof(response),"{\"next\":%lld}",next);return reply(out,status,response);
 fail:
         sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);return reply(out,503,"{\"error\":\"Log batch not committed\"}");
@@ -192,6 +188,14 @@ fail:
     if(strcmp(method,"GET"))return reply(out,405,"{\"error\":\"Use GET\"}");
     if(!strcmp(path,"/api/sol/config"))return reply(out,200,open_view?"{\"open_view\":true}":"{\"open_view\":false}");
     if(!open_view&&!authorized(root,"viewer",auth))return reply(out,403,"{\"error\":\"Enter the SOL viewing credential\"}");
+    if(!strncmp(path,"/api/sol/retention/",19)){
+        if(sscanf(path,"/api/sol/retention/%63[^/]%c",device,&extra)!=1||!identifier(device))return reply(out,400,"{\"error\":\"Invalid retention query\"}");
+        snprintf(canonical,sizeof(canonical),"/api/sol/retention/%s",device);
+        if(strcmp(path,canonical))return reply(out,400,"{\"error\":\"Invalid retention query\"}");
+        int code=sol_retention_query(db,device,out);
+        if(!*out)return reply(out,code,"{\"error\":\"Retention audit unavailable\"}");
+        return code;
+    }
     if(!strncmp(path,"/api/sol/incidents/",19)){
         int code=sol_evidence_query(db,path,out);
         if(!*out)return reply(out,code,"{\"error\":\"Incident log evidence unavailable\"}");

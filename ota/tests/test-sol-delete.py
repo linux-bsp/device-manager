@@ -102,7 +102,7 @@ class Delete(unittest.TestCase):
                 if predicate():return
                 self.assertIsNone(self.worker.poll());time.sleep(.1)
             self.fail('real uploader did not make progress')
-        wait_for(lambda:any(r['boot']=='current-boot' for r in self.request('/api/sol/devices')[1]))
+        wait_for(lambda:{r['boot'] for r in self.request('/api/sol/devices')[1]}=={'old-boot','current-boot'})
         self.assertEqual(self.remove('old-boot')[0],200)
         with (store/'current-boot/kernel.log').open('a') as f:f.write('[seq=2 mono=1 wall=0] progress after deletion\n')
         wait_for(lambda:any('progress after deletion' in r['text'] for r in self.request('/api/sol/logs/device-a/current-boot/all/0')[1]))

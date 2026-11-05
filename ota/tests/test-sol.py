@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Real HTTP/log forwarder tests; no hardware, flash or production feed access."""
+import contextlib
+import sqlite3
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,13 @@ import urllib.error
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT.parent/'logging/logctl'
+@contextlib.contextmanager
+def database(path):
+    connection=sqlite3.connect(path)
+    try:
+        with connection:yield connection
+    finally:connection.close()
+
 class SOL(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='sol-test-')
@@ -94,22 +103,70 @@ class SOL(unittest.TestCase):
         actual=self.logs()[0]['text'].encode('latin1')
         self.assertEqual(actual,data)
     def test_boot_and_generation_retention(self):
-        for i in range(6):self.assertEqual(self.push(boot=f'boot-{i}',order=i+1)[0],200)
+        for i in range(18):self.assertEqual(self.push(boot=f'boot-{i}',order=i+1)[0],200)
         status,boots=self.request('/api/sol/devices');self.assertEqual(status,200)
-        self.assertEqual(len(boots),4);self.assertEqual(boots[0]['boot'],'boot-5')
+        self.assertEqual(len(boots),16);self.assertEqual(boots[0]['boot'],'boot-17')
         self.assertEqual(self.logs('boot-0'),[])
-        for gen in range(2,8):self.assertEqual(self.push(boot='boot-5',order=6,gen=gen)[0],200)
-        self.assertEqual(len(self.logs('boot-5')),4)
+        for gen in range(2,8):self.assertEqual(self.push(boot='boot-17',order=18,gen=gen)[0],200)
+        self.assertEqual(len(self.logs('boot-17')),4)
+        # Backfill an old boot: arriving last must not evict the current boot.
+        self.assertEqual(self.push(boot='boot-0',order=1)[0],200)
+        self.assertTrue(self.logs('boot-17'))
+        status,events=self.request('/api/sol/retention/device-a');self.assertEqual(status,200)
+        self.assertTrue(any(e['reason']=='generation-limit' for e in events))
+        self.assertTrue(any(e['reason']=='boot-or-capacity-limit' for e in events))
     def test_chunk_retention_and_private_key_not_served(self):
         for i in range(2052):
             self.assertEqual(self.push(body=b'x',offset=i)[0],200)
         import sqlite3
-        with sqlite3.connect(self.feed/'sol.db') as c:
-            self.assertEqual(c.execute('select count(*) from chunks').fetchone()[0],2048)
+        with database(self.feed/'sol.db') as c:
+            self.assertEqual(c.execute('select count(*) from chunks').fetchone()[0],2052)
+            self.assertEqual(c.execute('select min(off) from chunks').fetchone()[0],0)
         self.assertEqual(self.push(body=b''),(200,{'next':2052}))
         try:self.http.open(self.url+'/sol-keys/viewer',timeout=5)
         except urllib.error.HTTPError as e:self.assertEqual(e.code,404)
         else:self.fail('private credential exposed by HTTP')
+    def test_legacy_sparse_cursor_is_reset_and_audited_on_restart(self):
+        self.push(body=b'first');self.push(body=b'second',offset=5)
+        self.stop()
+        import sqlite3
+        with database(self.feed/'sol.db') as c:c.execute('delete from chunks where off=0')
+        self.start()
+        self.assertEqual(self.push(body=b''),(200,{'next':0}))
+        self.assertEqual(self.push(body=b'firstsecond'),(200,{'next':11}))
+        status,events=self.request('/api/sol/retention/device-a');self.assertEqual(status,200)
+        self.assertEqual(events[0]['reason'],'legacy-incomplete-stream')
+        self.assertEqual(len(self.logs()),1)
+    def test_capacity_prunes_whole_boots_without_sparse_cursors(self):
+        self.push(boot='old',body=b'old');self.push(boot='current',order=2,body=b'x')
+        # Seed many tiny chunks efficiently; request processing enforces the
+        # same hard object quota as large chunks (at most 64 MiB/device).
+        import sqlite3
+        with database(self.feed/'sol.db') as c:
+            c.executemany('INSERT INTO chunks(device,boot,stage,gen,off,data) VALUES(?,?,?,?,?,?)',
+                [('device-a','old','kernel',1,i,'x') for i in range(3,16386)])
+            c.execute("UPDATE streams SET pos=16386 WHERE boot='old'")
+        self.assertEqual(self.push(boot='current',order=2,body=b'y',offset=1),(200,{'next':2}))
+        self.assertEqual(self.logs('old'),[])
+        self.assertEqual([r['off'] for r in self.logs('current')],[0,1])
+        self.assertEqual(self.push(boot='old',order=1,body=b''),(200,{'next':0}))
+    @unittest.skipUnless(LOG.exists(), 'build host logctl')
+    def test_forwarder_backfills_more_than_four_boots_and_chunk_budget(self):
+        store=self.path/'boots';store.mkdir()
+        payload=b'[seq=1 mono=0 wall=0] '+b'x'*(140*1024)
+        for i in range(7):
+            boot=store/f'boot-{i}';boot.mkdir();(boot/'order').write_text(str(i+1))
+            (boot/'kernel.log').write_bytes(payload if i==0 else f'[seq=1 mono=0 wall=0] history-{i}'.encode())
+        config=self.path/'sol.conf';config.write_text(f'server={self.url}\ndevice=device-a\nkey-file={self.feed}/sol-keys/device-a\ninterface=eth0\n')
+        env=dict(os.environ,LOGCTL_SOL_CONFIG=str(config),LOGCTL_RUN_DIR=str(self.path/'run'))
+        self.worker=subprocess.Popen([str(LOG),'forward','--root',str(store)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        self.request('/api/sol/devices')
+        for _ in range(360):
+            with database(self.feed/'sol.db') as c:
+                rows=c.execute('select boot,pos from streams').fetchall()
+            if len(rows)==7 and dict(rows).get('boot-0')==len(payload):break
+            self.assertIsNone(self.worker.poll());time.sleep(.1)
+        else:self.fail('historical boots or yielded chunk stream starved')
     def test_symlink_credential_rejected(self):
         p=self.feed/'sol-keys/device-a';p.unlink();p.symlink_to(self.feed/'sol-keys/viewer')
         self.assertEqual(self.push(key=self.viewer)[0],403)

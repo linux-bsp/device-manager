@@ -40,7 +40,7 @@ class IncidentEvidence(sol_tests.SOL):
         for order,boot in enumerate(('attempt-a','attempt-b'),2):
             self.assertEqual(self.report('boot-testing',observed=boot)[0],200)
             self.push((boot+' health-failed\n').encode(),boot=boot,order=order)
-        for i in range(6):self.push(b'new boot\n',boot=f'other-{i}',order=i+10)
+        for i in range(18):self.push(b'new boot\n',boot=f'other-{i}',order=i+10)
         self.assertEqual(self.logs('attempt-a'),[])
         self.assertEqual(self.report('rolled-back',observed='recovered',reason='boot-failed-rolled-back')[0],200)
         status,meta=self.evidence();self.assertEqual(status,200)
@@ -60,7 +60,7 @@ class IncidentEvidence(sol_tests.SOL):
         self.assertEqual(self.evidence()[1]['boots'][0]['bytes'],0)
         self.push(b'late log\n',boot='attempt-a')
         self.assertEqual(self.chunks('attempt-a')[1][0]['text'],'late log\n')
-        for i in range(6):self.push(boot=f'other-{i}',order=i+10)
+        for i in range(18):self.push(boot=f'other-{i}',order=i+10)
         self.push(b'late log\n',boot='attempt-a',order=1)
         self.assertEqual(len(self.chunks('attempt-a')[1]),1)
 

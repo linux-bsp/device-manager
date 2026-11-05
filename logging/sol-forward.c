@@ -107,12 +107,13 @@ static int upload_file(const char *path,const char *boot,long long order,const c
     if(sscanf(first,"[seq=%lld",&context.generation)!=1||context.generation<1){close(fd);return -1;}
     struct dm_transfer_push push={.fd=fd,.size=(uint64_t)st.st_size,.chunk_size=4096,.max_chunks=32,
         .exchange=push_chunk,.context=&context,.callbacks={.cancelled=transfer_cancelled}};
-    uint64_t next;int rc=dm_transfer_push_file(&push,&next);close(fd);return rc<0?-1:0;
+    uint64_t next;int rc=dm_transfer_push_file(&push,&next);close(fd);return rc;
 }
 struct boot {char name[64];long long order;};
 static int compare(const void *a,const void *b){const struct boot *x=a,*y=b;return x->order>y->order?-1:x->order<y->order?1:0;}
 static int cycle(const char *root)
 {
+    static size_t history_cursor;
     DIR *d=opendir(root);if(!d)return -1;struct dirent *entry;struct boot boots[256];size_t count=0;
     while((entry=readdir(d))&&count<256){
         char p[P],order[64];if(!safe(entry->d_name))continue;
@@ -121,9 +122,18 @@ static int cycle(const char *root)
         long long n=strtoll(order,NULL,10);if(n<1)continue;
         strcpy(boots[count].name,entry->d_name);boots[count++].order=n;
     }closedir(d);qsort(boots,count,sizeof(*boots),compare);
-    size_t selected=count<4?count:4;
-    for(size_t visit=selected;visit>0&&!stopped;visit--) {
-        size_t b=visit-1;
+    /* Live output first, then at most two historical boots per cycle. Rotate
+     * the history cursor even on error so one corrupt boot cannot starve all
+     * later evidence. Transport yields are not archive acknowledgements. */
+    size_t selected[3],visits=0;
+    if(count)selected[visits++]=0;
+    for(size_t i=0;i<2&&i+1<count;i++) {
+        selected[visits++]=1+history_cursor%(count-1);
+        history_cursor=(history_cursor+1)%(count-1);
+    }
+    int pending=0,failed=0;
+    for(size_t visit=0;visit<visits&&!stopped;visit++) {
+        size_t b=selected[visit];
         char p[P],meta[1024],hostname[64]="unknown",mac[64]="unknown";struct statfs fs;
         gethostname(hostname,sizeof(hostname)-1);hostname[sizeof(hostname)-1]=0;
         snprintf(p,sizeof(p),"/sys/class/net/%s/address",interface);read_text(p,mac,sizeof(mac));
@@ -142,10 +152,12 @@ static int cycle(const char *root)
         if(post(boots[b].name,boots[b].order,"meta",0,0,meta,strlen(meta),&next))return -1;
         for(size_t i=0;i<sizeof(stages)/sizeof(*stages);i++)for(int rotated=1;rotated>=0;rotated--){
             if(snprintf(p,sizeof(p),"%s/%s/%s.log%s",root,boots[b].name,stages[i],rotated?".1":"")>=(int)sizeof(p))return -1;
-            if(upload_file(p,boots[b].name,boots[b].order,stages[i]))return -1;
+            int rc=upload_file(p,boots[b].name,boots[b].order,stages[i]);
+            if(rc<0)failed=1;
+            else if(rc>0)pending=1;
         }
     }
-    return 0;
+    return failed?-1:pending;
 }
 int sol_forward(const char *root)
 {
@@ -165,7 +177,7 @@ int sol_forward(const char *root)
         if(clock_enabled)dm_clock_cycle(server,interface,device,key);
         if(stopped)break;
         int startup=startup_forward(device,post_path);
-        int result=cycle(root);
+        int result=cycle(root)<0?-1:0;
         if(startup)result=-1;
         if(result!=state){fprintf(stderr,"[logctld] [%s] SOL %s\n",result?"WARN":"INFO",result?"unavailable; local collection continues, retrying":"connected; log forwarding active");state=result;}
         for(int i=0;i<20&&!stopped;i++)usleep(250000);

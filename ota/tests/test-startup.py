@@ -75,10 +75,10 @@ class Startup(unittest.TestCase):
             self.assertIn('recovery-boot=recovery-boot',db.execute('select meta from startup_boots').fetchone()[0])
     def test_live_retention_does_not_erase_archive(self):
         data={'r5-spl':b'SPL first\n'};self.push('r5-spl',data['r5-spl']);self.push('commit',self.manifest(data))
-        for i in range(6):
+        for i in range(18):
             self.assertEqual(self.request(f'/api/sol/push/device-a/live-{i}/{i+1}/kernel/1/0',b'live\n')[0],200)
         _,rows=self.request('/api/sol/devices')
-        self.assertEqual(len(rows),5);self.assertEqual(rows[-1]['boot'],IDS[0])
+        self.assertEqual(len(rows),17);self.assertEqual(rows[-1]['boot'],IDS[0])
         _,rows=self.request('/api/sol/logs/device-a/'+IDS[0]+'/all/0')
         self.assertEqual(rows[0]['text'],'SPL first\n')
     def test_manifest_and_path_boundaries(self):

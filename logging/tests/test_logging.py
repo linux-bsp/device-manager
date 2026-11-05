@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise real daemon/CLI with isolated runtime directories, no device writes."""
 import os
+import json
 import re
 from pathlib import Path
 import socket
@@ -13,6 +14,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class Logging(unittest.TestCase):
+    def test_retention_journal_rotation_and_sync_failure(self):
+        binary=self.base/'retention-test'
+        subprocess.run([os.environ.get('CC','cc'),'-std=gnu11','-Wall','-Wextra','-Werror',
+            '-Wl,--wrap=fsync',str(ROOT/'tests/retention_test.c'),str(ROOT/'retention.c'),'-o',str(binary)],check=True)
+        subprocess.run([str(binary)],check=True,capture_output=True)
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='logctl-')
         self.base = Path(self.tmp.name)
@@ -105,6 +111,8 @@ class Logging(unittest.TestCase):
         files=list((self.store/'test-boot-1').glob('services.log*'))
         self.assertEqual(len(files),2)
         self.assertTrue(all(p.stat().st_size<=4096 for p in files))
+        losses=[json.loads(line) for line in self.cli('losses',check=True).stdout.splitlines()]
+        self.assertTrue(any(e['reason']=='stream-limit' and e['stage']=='services' and e['bytes']>0 for e in losses))
         output=self.base/'bundle.tar.gz'
         self.cli('export','--output',str(output),check=True)
         with tarfile.open(output) as archive:
@@ -116,12 +124,35 @@ class Logging(unittest.TestCase):
         p.unlink();p.write_text('replacement-message\n')
         self.wait(lambda:'replacement-message' in self.text())
     def test_retention_and_previous(self):
-        for i in range(6):
+        for i in range(15):
             self.env['LOGCTL_BOOT_ID']=f'test-boot-{i}'
             self.start();self.stop()
-        self.assertEqual(len(list(self.store.iterdir())),4)
-        self.assertIn('test-boot-5 current',self.cli('boots').stdout)
+        self.assertEqual(len([p for p in self.store.iterdir() if p.is_dir()]),12)
+        self.assertIn('test-boot-14 current',self.cli('boots').stdout)
+        losses=[json.loads(line) for line in self.cli('losses',check=True).stdout.splitlines()]
+        self.assertEqual({e['boot'] for e in losses if e['reason']=='boot-limit'}, {'test-boot-0','test-boot-1','test-boot-2'})
+        self.assertIn('reason=boot-limit', self.text('events'))
         self.assertEqual(self.cli('show','--boot','previous').returncode,0)
+    def test_retention_cannot_delete_without_durable_audit(self):
+        for i in range(12):
+            boot=self.store/f'old-{i}';boot.mkdir();(boot/'order').write_text(str(i+1))
+            (boot/'services.log').write_text('retained evidence')
+        victim=self.base/'outside';victim.write_text('unchanged')
+        (self.store/'.retention.log').symlink_to(victim)
+        self.env['LOGCTL_BOOT_ID']='test-boot-new';self.start();self.stop()
+        self.assertTrue((self.store/'old-0/services.log').exists())
+        self.assertEqual(victim.read_text(),'unchanged')
+    def test_byte_quota_evicts_oldest_and_preserves_current(self):
+        for i in range(5):
+            boot=self.store/f'old-{i}';boot.mkdir();(boot/'order').write_text(str(i+1))
+            (boot/'kernel.log').write_bytes(b'x'*8192)
+        self.env['LOGCTL_TOTAL_LIMIT']='24576';self.start();self.stop()
+        self.assertTrue((self.store/'test-boot-1').is_dir())
+        self.assertFalse((self.store/'old-0').exists())
+        self.assertFalse((self.store/'old-1').exists())
+        self.assertTrue((self.store/'old-4/kernel.log').exists())
+        losses=[json.loads(line) for line in self.cli('losses',check=True).stdout.splitlines()]
+        self.assertTrue(all(e['reason']=='capacity-limit' for e in losses))
     def test_single_daemon_and_malformed_packets(self):
         self.start()
         other=subprocess.run([str(ROOT/'logctld'),'--root',str(self.store)],env=self.env,capture_output=True)
