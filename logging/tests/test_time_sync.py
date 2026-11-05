@@ -87,7 +87,7 @@ class ClockSync(unittest.TestCase):
         self.url=f'http://127.0.0.1:{self.server.server_port}'
         conf=self.base/'sol.conf';conf.write_text(f'server={self.url}\nauth=none\ndevice=device-a\ninterface=lo\n')
         self.capture=self.base/'calls';rtc=self.base/'rtc';rtc.touch()
-        self.env=dict(os.environ,LD_PRELOAD=str(self.preload),DM_CLOCK_TEST_CAPTURE=str(self.capture),DM_CLOCK_TEST_RTC=str(rtc),LOGCTL_RUN_DIR=str(self.base/'run'),LOGCTL_SOL_CONFIG=str(conf))
+        self.env=dict(os.environ,TZ='CST-8',LD_PRELOAD=str(self.preload),DM_CLOCK_TEST_CAPTURE=str(self.capture),DM_CLOCK_TEST_RTC=str(rtc),LOGCTL_RUN_DIR=str(self.base/'run'),LOGCTL_SOL_CONFIG=str(conf))
     def tearDown(self):
         if self.worker:self.worker.terminate();self.worker.communicate(timeout=8)
         self.server.shutdown();self.server.server_close();self.thread.join();self.tmp.cleanup()
@@ -97,7 +97,10 @@ class ClockSync(unittest.TestCase):
     def test_initial_clock_calibrates_and_writes_utc_rtc(self):
         result=self.sync();self.assertEqual(result.returncode,0,result.stderr)
         calls=self.capture.read_text();seconds=int(re.search(r'set (\d+) ',calls)[1]);self.assertLess(abs(seconds-time.time()),2)
-        self.assertIn(time.strftime('rtc %Y-%m-%dT',time.gmtime()),calls)
+        self.assertIn(time.strftime('rtc %Y-%m-%dT%H:%M:',time.gmtime(seconds)),calls)
+        self.assertIn('+0800',result.stderr)
+        self.assertEqual(self.status()['clock-timezone'],'+0800')
+        self.assertTrue(self.status()['clock-synced-local'].endswith('+0800'))
         status=self.status();self.assertEqual(status['clock-state'],'synchronized');self.assertEqual(status['rtc-state'],'written')
         self.assertEqual(len(self.nonces),3);self.assertEqual(len(set(self.nonces)),3)
     def test_bad_nonce_epoch_precision_and_payload_never_set_clock(self):

@@ -9,7 +9,7 @@ const phaseNames = {
   'up-to-date': '版本一致', 'device-error': '设备异常', 'verify-failed': '校验失败',
   'transport-error': '网络传输重试中', cancelled: '升级已取消'
 };
-function fleetTime(seconds) { return seconds ? new Date(seconds * 1000).toLocaleString() : '未上报'; }
+function fleetTime(seconds) { return DeviceTime.format(seconds, '未上报'); }
 function fleetPhase(phase) { return phaseNames[phase] || phase || '未上报'; }
 function fleetTone(phase) {
   if (phase === 'success' || phase === 'up-to-date') return 'good';

@@ -70,6 +70,7 @@ try {
             body:`BSPOTASTATE3 browser-test 1010001000110000 2 65538 next-boot ${phase} 0 65537 not-reported\n`});
         assert.equal(r.status,200);
     }
+    await rpc('Emulation.setTimezoneOverride',{timezoneId:'America/New_York'});
     await rpc('Page.navigate',{url});
     await until(()=>evaluate("document.querySelector('#service-health')?.textContent === '管理服务已连接' && document.querySelector('#metric-devices')?.textContent==='1' && document.querySelector('#metric-success')?.textContent==='1' && !!document.querySelector('#firmware')"),'page state');
     assert(await evaluate("!document.querySelector('#dashboard-panel').hidden && document.querySelector('#metric-devices').textContent==='1' && document.querySelector('#metric-success').textContent==='1'"),'Dashboard summary');
@@ -161,7 +162,7 @@ try {
     for(const table of ['drafts','releases']){
         assert.deepEqual(await evaluate(`[...document.querySelectorAll('#${table}-table th')].map(x=>x.textContent)`),['产品','固件版本','固件ID','大小','上传时间','操作','详情']);
         const uploaded=await evaluate(`document.querySelector('#${table} tr').children[4].textContent`);
-        assert.equal(uploaded,await evaluate(`new Date(${draft.uploaded_at}*1000).toLocaleString()`),'Original upload time in '+table);
+        assert.equal(uploaded,await evaluate(`new Intl.DateTimeFormat('zh-CN',{timeZone:'Etc/GMT-8',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(${draft.uploaded_at}*1000)+' +08:00'`),'Original upload time in '+table);
     }
     await evaluate("document.querySelector('#tab-manage').click()");
     assert(await evaluate("!document.querySelector('#overview a.download')"),'Download only in details');

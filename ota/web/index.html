@@ -25,8 +25,8 @@
 <main>
 <section id="clock-panel" hidden>
 <div class="metric-grid clock-metrics">
-<div class="metric"><div class="metric-label">管理服务器时间 · 北京时间</div><div id="clock-server-time" class="clock-time">—</div><div class="metric-hint">基于服务器最近一次响应推算</div></div>
-<div class="metric"><div class="metric-label">设备上报时间 · 北京时间</div><div id="clock-device-time" class="clock-time">—</div><div id="clock-time-hint" class="metric-hint">选择设备查看</div></div>
+<div class="metric"><div class="metric-label">管理服务器时间 · UTC+8</div><div id="clock-server-time" class="clock-time">—</div><div class="metric-hint">基于服务器最近一次响应推算</div></div>
+<div class="metric"><div class="metric-label">设备上报时间 · UTC+8</div><div id="clock-device-time" class="clock-time">—</div><div id="clock-time-hint" class="metric-hint">选择设备查看</div></div>
 </div>
 <div class="clock-layout"><section class="card"><div class="section-head"><div><h2>设备校时状态</h2><p class="muted">只显示设备实际回报；网页本机时间不作为设备时间源。</p></div><button id="clock-refresh" class="secondary" type="button">刷新</button></div>
 <div class="toolbar"><label for="clock-device">设备</label><select id="clock-device"></select><span id="clock-online" class="pill">待获取</span></div>
@@ -98,6 +98,7 @@
 </div>
 </main></div>
 <script>
+/* INLINE_TIME */
 /* INLINE_SOL */
 /* INLINE_SOL_NAMES */
 /* INLINE_HWID */

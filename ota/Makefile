@@ -12,7 +12,7 @@ AGENT_HEADERS = $(wildcard agent/*.h shared/*.h)
 .PHONY: all test clean
 all: device-server fwctld ota-cli
 
-ota-page.h: web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py ../config/hwid-registry.json ../identity/registry.py
+ota-page.h: web/time-format.js web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py ../config/hwid-registry.json ../identity/registry.py
 	python3 web/embed.py $@
 
 device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h $(DM_TRANSFER_SERVER)
@@ -25,7 +25,7 @@ ota-cli: cli/ota-cli.c $(DM_TRANSFER_CLIENT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) cli/ota-cli.c $(DM_TRANSFER_CLIENT) $(LDFLAGS) -lcurl -pthread -o $@
 
 test: all
-	node --test ./tests/test-sol-console.cjs ./tests/test-sol-names.cjs ./tests/test-hwid.cjs
+	node --test ./tests/test-time-format.cjs ./tests/test-sol-console.cjs ./tests/test-sol-names.cjs ./tests/test-hwid.cjs
 	python3 ./tests/test-hwid-registry.py
 	sh ./tests/test-ota.sh
 	python3 ./tests/test-admin.py

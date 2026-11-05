@@ -89,7 +89,13 @@ static void status_file(const char *state,const char *server,long long offset,lo
 {
     char path[1024],temp[1024];if(state_path(path,sizeof(path),"clock-status")||state_path(temp,sizeof(temp),".clock-status.tmp"))return;
     int fd=open(temp,O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC|O_NOFOLLOW,0600);if(fd<0)return;
-    int ret=dprintf(fd,"clock-state=%s\nclock-source=%s\nclock-server=%s\nclock-synced-at=%lld\nclock-offset-ms=%lld\nclock-uncertainty-ms=%lld\nrtc-state=%s\n",state,!strncmp(server,"ntp://",6)?"ntp":"device-manager",server,(long long)last_sync,offset,uncertainty,last_rtc);
+    char when[48]="unknown",zone[16]="unknown";
+    time_t seconds=last_sync?(time_t)last_sync:time(NULL);struct tm local;
+    if(localtime_r(&seconds,&local)){
+        strftime(zone,sizeof(zone),"%z",&local);
+        if(last_sync)strftime(when,sizeof(when),"%Y-%m-%dT%H:%M:%S%z",&local);
+    }
+    int ret=dprintf(fd,"clock-state=%s\nclock-source=%s\nclock-server=%s\nclock-synced-at=%lld\nclock-offset-ms=%lld\nclock-uncertainty-ms=%lld\nrtc-state=%s\nclock-timezone=%s\nclock-synced-local=%s\n",state,!strncmp(server,"ntp://",6)?"ntp":"device-manager",server,(long long)last_sync,offset,uncertainty,last_rtc,zone,when);
     int failed=ret<0||fsync(fd);if(close(fd))failed=1;
     if(failed||rename(temp,path))unlink(temp);
 }
@@ -141,8 +147,8 @@ int dm_time_sync(const char *server,const char *interface,int force)
             anchor_wall=now_ns(CLOCK_REALTIME);anchor_mono=now_ns(CLOCK_BOOTTIME);last_sync=anchor_wall/NS;
             persist_rtc();status_file("synchronized",server,offset/1000000,(best.rtt+1999999)/2000000);
             next_attempt=anchor_mono+(int64_t)sync_interval*NS;last_state=2;warned=0;
-            char when[40];time_t seconds=(time_t)last_sync;struct tm utc;
-            gmtime_r(&seconds,&utc);strftime(when,sizeof(when),"%Y-%m-%dT%H:%M:%SZ",&utc);
+            char when[48];time_t seconds=(time_t)last_sync;struct tm local;
+            localtime_r(&seconds,&local);strftime(when,sizeof(when),"%Y-%m-%dT%H:%M:%S%z",&local);
             fprintf(stderr,"[logctld] [INFO] time synchronized: %s source=%s rtc=%s\n",when,server,last_rtc);
             close(lock);return 0;
         }

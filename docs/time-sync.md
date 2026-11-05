@@ -4,6 +4,16 @@ Device Manager 提供简易 HTTP 校时服务，复用现有管理端口（开�
 
 ## 设备行为
 
+AM625 默认本地时区为 UTC+8。Buildroot 使用 `BR2_TARGET_TZ_INFO=y`、
+`BR2_TARGET_TZ_ZONELIST="etcetera"`、`BR2_TARGET_LOCALTIME="Etc/GMT-8"`，
+安装 `/etc/localtime`；此 IANA 名称的负号表示东八区，不使用夏令时。
+`date`、校时成功日志、`clock-synced-local` 以及网页校时/OTA/设备时间均显示 UTC+8。
+网页不跟随浏览器时区。`date -u` 仍显示 UTC；NTP/HTTP 时间戳、数据库 Unix 秒和 RTC
+均保持 UTC，不在校准数值上额外加八小时。kernel 的启动秒数保持原始格式。
+
+`logctl status` 中的 `clock-timezone=+0800` 和带偏移的 `clock-synced-local`
+用于检查显示；`clock-synced-at` 继续为原始 Unix 秒，便于不同时间源交叉核对。
+
 AM625 的 `/etc/device-manager/sol.conf` 默认包含：
 
 ```ini

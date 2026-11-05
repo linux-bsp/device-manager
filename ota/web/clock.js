@@ -1,6 +1,6 @@
 'use strict';
 const clockView={data:null,received:0,dirty:false,loading:null,busy:false};
-const clockWhen=seconds=>seconds>=1577836800&&seconds<4102444800?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(seconds*1000)+' +08:00':'未校准';
+const clockWhen=seconds=>DeviceTime.format(seconds,'未校准');
 const clockFields=report=>Object.fromEntries((report||'').split('\n').slice(1).filter(line=>line.includes('=')).map(line=>[line.slice(0,line.indexOf('=')),line.slice(line.indexOf('=')+1)]));
 function clockRow(){return clockView.data?.devices.find(row=>row.device===$('clock-device').value);}
 function clockProtocol(){
