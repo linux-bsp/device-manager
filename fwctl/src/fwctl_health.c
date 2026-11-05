@@ -38,8 +38,8 @@ static int health_check_boot(const struct fwctl_options *options)
 	struct stat st;
 
 	(void)options;
-	if (stat("/run/rcS.failed", &st) == 0 && st.st_size > 0)
-		return health_report("a boot service failed: %s", "/run/rcS.failed");
+	if (stat("/run/rcS.critical", &st) == 0 && st.st_size > 0)
+		return health_report("a critical boot service failed: %s", "/run/rcS.critical");
 	return 0;
 }
 
@@ -80,10 +80,7 @@ static int health_check_pid(const char *name, const char *path)
 static int health_check_pids(const struct fwctl_options *options)
 {
 	(void)options;
-	int ret = health_check_pid("system_manager", "/run/system_manager.pid");
-	if (ret)
-		return ret;
-	return health_check_pid("dropbear", "/var/run/dropbear.pid");
+	return health_check_pid("system_manager", "/run/system_manager.pid");
 }
 
 static const char *service_name(uint16_t service_id)
@@ -100,6 +97,7 @@ static int health_check_manager(const struct fwctl_options *options)
 	struct osa_ipc_message message;
 	struct osa_ipc_health_status status;
 	size_t offset;
+	int critical_seen = 0;
 	int fd;
 	int ret;
 
@@ -118,23 +116,32 @@ static int health_check_manager(const struct fwctl_options *options)
 		return health_pending("system_manager health query not ready: %s",
 				     strerror(-ret));
 	if (message.header.message_type != OSA_IPC_MESSAGE_HEALTH_SNAPSHOT ||
+	    message.header.service_id != OSA_IPC_SERVICE_SYSTEM_MANAGER ||
+	    message.header.payload_length > sizeof(message.payload) ||
 	    message.header.payload_length % sizeof(status))
 		return health_report("system_manager returned invalid health data: %s",
 				     "protocol error");
 	for (offset = 0; offset < message.header.payload_length;
 	     offset += sizeof(status)) {
-		memcpy(&status, message.payload + offset, sizeof(status));
+        memcpy(&status, message.payload + offset, sizeof(status));
+        if (status.state > OSA_IPC_HEALTH_FAILED)
+            return health_report("invalid service health state: %s", "protocol error");
+        if (status.service_id == OSA_IPC_SERVICE_PSATELLITED) {
+            if (critical_seen++ || !(status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED))
+                return health_report("critical service health is inconsistent: %s", "psatellited");
+        }
 		if ((status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED) &&
 		    (status.state == OSA_IPC_HEALTH_PENDING ||
 		     status.state == OSA_IPC_HEALTH_RESTARTING))
 			return health_pending("required service is not ready: %s",
 					     service_name(status.service_id));
-		if (status.state == OSA_IPC_HEALTH_EXPIRED ||
-		    status.state == OSA_IPC_HEALTH_FAILED)
+		if ((status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED) &&
+		    (status.state == OSA_IPC_HEALTH_EXPIRED ||
+		     status.state == OSA_IPC_HEALTH_FAILED))
 			return health_report("service is unhealthy: %s",
 					     service_name(status.service_id));
 	}
-	return 0;
+	return critical_seen ? 0 : health_report("critical service missing from health snapshot: %s", "psatellited");
 }
 
 static int health_check_executables(const struct fwctl_options *options)

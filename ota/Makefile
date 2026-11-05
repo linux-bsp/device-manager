@@ -49,6 +49,7 @@ test: all
 	python3 ./tests/test-manager-time.py
 	python3 ./tests/test-clock-control.py
 	python3 ./tests/test-boot-health.py
+	python3 ./tests/test-boot-criticality.py
 	python3 ./tests/test-incident-evidence.py
 	python3 ./tests/test-startup-incident.py
 	python3 ./tests/test-diagnostics.py

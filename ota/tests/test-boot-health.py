@@ -31,7 +31,7 @@ status)
 mark-good) exit "${MARK_EXIT:-0}" ;;
 esac
 ''');fw.chmod(0o755)
-        text=SOURCE.read_text().replace('/usr/sbin/fwctl',str(fw)).replace('interval=5','interval=0').replace('/run/fwctl-boot-confirmed',str(self.marker)).replace('/run/rcS.failed',str(self.base/'failed')).replace('/var/run/fw-mark-good.pid',str(self.base/'pid'))
+        text=SOURCE.read_text().replace('/usr/sbin/fwctl',str(fw)).replace('interval=5','interval=0').replace('/run/fwctl-boot-confirmed',str(self.marker)).replace('/run/rcS.critical',str(self.base/'failed')).replace('/var/run/fw-mark-good.pid',str(self.base/'pid'))
         text=text.replace('/run/fwctl-health.last',str(self.base/'health-last')).replace('\tsync\n','\t:\n').replace('\treboot\n','\techo reboot >> "$CALLS"\n')
         self.script=self.base/'init';self.script.write_text(text)
     def tearDown(self):self.tmp.cleanup()

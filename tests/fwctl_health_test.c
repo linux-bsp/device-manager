@@ -5,6 +5,9 @@
 
 static int ipc_state = OSA_IPC_HEALTH_READY;
 static int ipc_unavailable;
+static int optional_state = OSA_IPC_HEALTH_FAILED;
+static int omit_critical;
+static int bad_state;
 
 int osa_ipc_connect(const char *path, int timeout_ms)
 {
@@ -29,11 +32,16 @@ int osa_ipc_receive(int fd, struct osa_ipc_message *message, int timeout_ms)
     struct osa_ipc_health_status status = {
         .service_id = OSA_IPC_SERVICE_PSATELLITED,
         .flags = OSA_IPC_HEALTH_FLAG_REQUIRED,
-        .state = ipc_state,
+        .state = bad_state ? 99 : ipc_state,
     };
     message->header.message_type = OSA_IPC_MESSAGE_HEALTH_SNAPSHOT;
-    message->header.payload_length = sizeof(status);
+    message->header.service_id = OSA_IPC_SERVICE_SYSTEM_MANAGER;
+    message->header.payload_length = omit_critical ? 0 : sizeof(status);
     memcpy(message->payload, &status, sizeof(status));
+    status.service_id = OSA_IPC_SERVICE_PTELEMETRYD;
+    status.flags = 0; status.state = optional_state;
+    memcpy(message->payload + message->header.payload_length, &status, sizeof(status));
+    message->header.payload_length += sizeof(status);
     return 0;
 }
 
@@ -41,6 +49,10 @@ int main(void)
 {
     assert(health_check_pid("test", "/nonexistent/fwctl-health-pid") == -EAGAIN);
     assert(!health_check_manager(NULL));
+    optional_state = OSA_IPC_HEALTH_EXPIRED;
+    assert(!health_check_manager(NULL));
+    omit_critical = 1; assert(health_check_manager(NULL) == -EIO); omit_critical = 0;
+    bad_state = 1; assert(health_check_manager(NULL) == -EIO); bad_state = 0;
     ipc_state = OSA_IPC_HEALTH_PENDING;
     assert(health_check_manager(NULL) == -EAGAIN);
     ipc_state = OSA_IPC_HEALTH_RESTARTING;
