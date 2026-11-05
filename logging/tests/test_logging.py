@@ -117,6 +117,33 @@ class Logging(unittest.TestCase):
         self.cli('export','--output',str(output),check=True)
         with tarfile.open(output) as archive:
             self.assertIn('test-boot-1/services.log',archive.getnames())
+    def test_export_failure_preserves_previous_file_and_removes_partial(self):
+        self.start();self.stop()
+        output=self.base/'snapshot.tar.gz';output.write_bytes(b'previous archive')
+        tools=self.base/'tools';tools.mkdir();tar=tools/'tar'
+        tar.write_text('#!/bin/sh\nprintf partial-compressed-bytes\nexit 7\n');tar.chmod(0o755)
+        self.env['PATH']=str(tools)
+        self.assertNotEqual(self.cli('export','--output',str(output)).returncode,0)
+        self.assertEqual(output.read_bytes(),b'previous archive')
+        self.assertEqual(list(self.base.glob('*.tmp.*')),[])
+    def test_export_resolves_output_parent_before_rejecting_log_recursion(self):
+        self.start();self.stop()
+        alias=self.base/'alias';alias.symlink_to(self.store,target_is_directory=True)
+        self.assertNotEqual(self.cli('export','--output',str(alias/'recursive.tar.gz')).returncode,0)
+        self.assertFalse((self.store/'recursive.tar.gz').exists())
+    def test_export_reaps_a_hung_archiver_within_deadline(self):
+        self.start();self.stop()
+        tools=self.base/'tools';tools.mkdir();tar=tools/'tar'
+        pidfile=self.base/'child.pid'
+        tar.write_text(f'#!/bin/sh\necho $$ > {pidfile}\nexec /bin/sleep 60\n');tar.chmod(0o755)
+        self.env['PATH']=str(tools);output=self.base/'hung.tar.gz'
+        started=time.monotonic()
+        result=subprocess.run([str(ROOT/'logctl'),'export','--output',str(output)],
+            env=self.env,capture_output=True,timeout=35)
+        self.assertNotEqual(result.returncode,0)
+        self.assertLess(time.monotonic()-started,35)
+        self.assertFalse(output.exists())
+        self.assertFalse((Path('/proc')/pidfile.read_text().strip()).exists())
     def test_service_tail_truncation_and_replacement(self):
         self.start();p=self.services/'test.log';p.write_text('first-message\n')
         self.wait(lambda:'first-message' in self.text())

@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "sol-forward.h"
 #include "retention.h"
+#include "archive.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -531,9 +532,9 @@ static int cli_main(int argc,char **argv)
         return 0;
     }
     if(!strcmp(argv[1],"export")&&output&&output[0]=='/'&&!stage){
-        /* tar is the installed BusyBox applet. Never pass a shell command. */
-        if(!strncmp(output,root,strlen(root))){fprintf(stderr,"Export destination must be outside the log directory\n");return 2;}
-        execlp("tar","tar","-czf",output,"-C",root,boot,NULL);perror("tar");return 1;
+        int rc=log_archive_create(root,boot,output);
+        if(rc)fprintf(stderr,"[logctl] [ERROR] export failed: %s\n",strerror(-rc));
+        return rc?1:0;
     }
 usage:
     fprintf(stderr,"Usage: logctl sync-time | verify-storage | verify-boot\n"
