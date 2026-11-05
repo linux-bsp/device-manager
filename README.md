@@ -23,6 +23,7 @@
 - `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
 - `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
 - `logging/`：本地日志组件及集成测试。
+- `transfer/`：OTA、SOL、恢复与校时共用的 C 传输库，提供 HTTP/TFTP、流式上传、持久化续传和服务端文件传输；见 [接口与一致性约束](transfer/README.md)。
 - `config/hwid-registry.json`：产品线、项目和型号名称字典，按上级编码匹配；维护规则见 [HWID 文档](docs/hwid.md#名称字典)。
 - `tests/`：固件事务、恢复和版本显示测试。
 
@@ -35,7 +36,7 @@ make -C buildroot O="$PWD/output/am625" host-device-manager
 make -C buildroot O="$PWD/output/am625" device-manager
 ```
 
-主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 需要 zlib、SQLite；fwctl 需要 libcurl、OpenSSL、libfdt 和 pthread；日志工具需要 libcurl。OTA 工具运行时需要 curl、sha256sum、tar 及对应 FIT 工具。`make -C ota test` 的日志格式回归使用 Node.js 18 或更新版本。
+主机程序安装到 `output/am625/host/bin/`；设备程序安装到 target 的 `/usr/sbin/`。独立开发可使用 `make host`、`make device` 和 `make test`，通过 `CC`、`CPPFLAGS`、`LDFLAGS` 指定工具链与依赖。host 服务需要 zlib、SQLite、OpenSSL 和 FIT 工具；ota-cli 需要 libcurl、pthread。fwctl 需要 libcurl、OpenSSL、libfdt、libubootenv 和 pthread；fwctld 与日志工具通过公共传输库使用 libcurl。OTA/SOL 不再启动 curl 或 sha256sum 子进程；主机端解包仍使用 tar。`make -C ota test` 的日志格式回归使用 Node.js 18 或更新版本。
 
 ```sh
 device-server --root /path/to/feed --bind 0.0.0.0 --port 8090

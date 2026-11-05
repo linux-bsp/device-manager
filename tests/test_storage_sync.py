@@ -92,10 +92,10 @@ class StorageSync(unittest.TestCase):
 
     def test_download_sync_failure_never_promotes_current(self):
         payloads = {name: (name+' fixture\n').encode() for name in ('release.itb', 'kernel.itb', 'rootfs.itb')}
-        manifest = b'BSPOTA1 2 test test\n'+b''.join(
+        manifest = b'BSPOTA2 2 1010001000110000\n'+b''.join(
             f'{name} {len(body)} {hashlib.sha256(body).hexdigest()}\n'.encode()
             for name, body in payloads.items())
-        paths = {'/latest': manifest, '/releases/2/version': b'BSPOTAVERSION1 2 v0.0.1 '+b'a'*64+b'\n'}
+        paths = {'/latest/1010001000110000': manifest, '/releases/2/version': b'BSPOTAVERSION1 2 v0.0.1 '+b'a'*64+b'\n'}
         paths.update({'/releases/2/'+name: body for name, body in payloads.items()})
 
         class Handler(BaseHTTPRequestHandler):
@@ -117,15 +117,17 @@ class StorageSync(unittest.TestCase):
                         cache.mkdir(parents=True)
                         # A complete staged file still requires a successful flush before reuse.
                         if suffix == 'kernel.itb':
-                            stage = cache/'.download-2';stage.mkdir()
+                            stage = cache/'1010001000110000/.download-2';stage.mkdir(parents=True)
                             (stage/suffix).write_bytes(payloads[suffix])
-                        previous = manifest.replace(b'BSPOTA1 2 ', b'BSPOTA1 1 ', 1)
+                        cache = cache/'1010001000110000'
+                        cache.mkdir(parents=True, exist_ok=True)
+                        previous = manifest.replace(b'BSPOTA2 2 ', b'BSPOTA2 1 ', 1)
                         (cache/'current').write_bytes(previous)
                         env = dict(self.env, DM_TEST_SYNC_PATH=str(cache),
-                                   DM_TEST_SYNC_SUFFIX=suffix, DM_TEST_SYNC_ERRNO=str(error))
+                                   DM_TEST_SYNC_SUFFIX='1010001000110000' if suffix=='cache' else suffix, DM_TEST_SYNC_ERRNO=str(error))
                         args = [str(SOURCE/'ota/fwctld'), '--server',
-                                f'http://127.0.0.1:{server.server_port}', '--cache', str(cache),
-                                '--product', 'test', '--layout', 'test', '--once']
+                                f'http://127.0.0.1:{server.server_port}', '--cache', str(cache.parent),
+                                '--hwid', '1010001000110000', '--once']
                         self.marker.touch()
                         result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=8)
                         self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)

@@ -1,13 +1,14 @@
 #ifndef DEVICE_MANAGER_HTTP_H
 #define DEVICE_MANAGER_HTTP_H
 
+#include "dm/transfer-server.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 /* Header values point into storage and remain valid for the request lifetime. */
 struct http_request {
-    char storage[8192];
+    struct dm_transfer_http_request transport;
     char method[16];
     char path[2048];
     char protocol[16];

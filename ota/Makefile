@@ -1,6 +1,8 @@
 CC ?= cc
 CFLAGS ?= -O2 -g
 CFLAGS += -std=c11 -Wall -Wextra -Werror
+.DEFAULT_GOAL := all
+include ../transfer/consumer.mk
 INCLUDES = -I. -Iserver -Iagent -Ishared -I../identity/include
 SERVER_SOURCES = $(wildcard server/*.c) shared/ota-common.c shared/ota-report.c
 SERVER_HEADERS = $(wildcard server/*.h shared/*.h) ../identity/include/dm/hwid-value.h
@@ -13,14 +15,14 @@ all: device-server fwctld ota-cli
 ota-page.h: web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py ../config/hwid-registry.json ../identity/registry.py
 	python3 web/embed.py $@
 
-device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(SERVER_SOURCES) $(LDFLAGS) -lz -lsqlite3 -o $@
+device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h $(DM_TRANSFER_SERVER)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) $(SERVER_SOURCES) $(DM_TRANSFER_SERVER) $(LDFLAGS) -lcrypto -lz -lsqlite3 -o $@
 
-fwctld: $(AGENT_SOURCES) $(AGENT_HEADERS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(AGENT_SOURCES) $(LDFLAGS) -o $@
+fwctld: $(AGENT_SOURCES) $(AGENT_HEADERS) $(DM_TRANSFER_CLIENT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) $(AGENT_SOURCES) $(DM_TRANSFER_CLIENT) $(LDFLAGS) -lcurl -lcrypto -pthread -o $@
 
-ota-cli: cli/ota-cli.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) cli/ota-cli.c $(LDFLAGS) -o $@
+ota-cli: cli/ota-cli.c $(DM_TRANSFER_CLIENT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) cli/ota-cli.c $(DM_TRANSFER_CLIENT) $(LDFLAGS) -lcurl -pthread -o $@
 
 test: all
 	node --test ./tests/test-sol-console.cjs ./tests/test-sol-names.cjs ./tests/test-hwid.cjs

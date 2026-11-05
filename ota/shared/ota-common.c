@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "ota-common.h"
+#include "dm/transfer.h"
 #include "dm/hwid-value.h"
 #include <ctype.h>
 #include <errno.h>
@@ -127,20 +128,14 @@ int ota_run(char *const argv[], char *output, unsigned capacity)
 int ota_hash(const char *path, char hash[65], unsigned long long *size)
 {
     struct stat st;
-    char output[256];
-    char *args[] = {"sha256sum", (char *)path, NULL};
-    if (lstat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
-        (unsigned long long)st.st_size > OTA_MAX_FILE || ota_run(args, output, sizeof(output)))
-        return -1;
-    if (strlen(output) < 65 || output[64] != ' ')
-        return -1;
-    for (int i = 0; i < 64; i++)
-        if (!isxdigit((unsigned char)output[i]))
-            return -1;
-    memcpy(hash, output, 64);
-    hash[64] = 0;
-    *size = (unsigned long long)st.st_size;
-    return 0;
+    int fd = open(path, O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK);
+    if (fd < 0) return -1;
+    int rc = fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        (unsigned long long)st.st_size > OTA_MAX_FILE ? -1 :
+        dm_transfer_sha256_fd(fd, (uint64_t)st.st_size, hash, NULL);
+    if (!rc) *size = (unsigned long long)st.st_size;
+    if (close(fd)) rc = -1;
+    return rc;
 }
 
 int ota_read_stream(FILE *f, struct release *r)

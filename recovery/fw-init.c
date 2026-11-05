@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "dm/transfer.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -313,6 +314,16 @@ static int alternate_rootfs_identity(unsigned deployment, struct alternate_rootf
 
 /* Background maintenance after boot health confirmation, never on PID 1's
  * handoff path. The engine rechecks identity and mounted-slot safety under lock. */
+static int fetch_rootfs(const char *url, const char *path, uint64_t maximum, long timeout, long low_speed)
+{
+    struct dm_transfer_download options = {0}; struct dm_transfer_result result;
+    dm_transfer_request_init(&options.request);
+    options.request.url = url; options.request.connect_timeout_ms = 10000; options.request.timeout_ms = timeout;
+    options.request.low_speed_bytes = 1024; options.request.low_speed_seconds = low_speed;
+    options.path = path; options.maximum = maximum;
+    return dm_transfer_download_file(&options, &result);
+}
+
 static void repair_alternate_rootfs(const struct settings *settings,
                                     unsigned deployment, unsigned current_slot)
 {
@@ -341,19 +352,13 @@ static void repair_alternate_rootfs(const struct settings *settings,
         return;
     }
     log_message("alternate rootfs is damaged; attempting exact network recovery");
-    char url[768], bytes[32], limit[32];
+    char url[768], bytes[32];
     snprintf(url, sizeof(url), "%s/recovery/%s/rootfs/%u/%s/%s/rootfs.itb",
         settings->server, settings->hwid,
         id.version, id.firmware_id, id.payload);
     snprintf(bytes, sizeof(bytes), "%llu", (unsigned long long)id.bytes);
-    snprintf(limit, sizeof(limit), "%llu", (unsigned long long)id.bytes + 1024 * 1024);
     unlink("/tmp/recovery-alternate-rootfs.itb");
-    char *get[] = {"/usr/bin/curl", "--disable", "--fail", "--silent", "--show-error",
-        "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "10",
-        "--max-time", "60", "--speed-limit", "1024", "--speed-time", "15",
-        "--max-filesize", limit, "--output", "/tmp/recovery-alternate-rootfs.itb",
-        "--url", url, NULL};
-    if (run(get, NULL, 0)) {
+    if (fetch_rootfs(url, "/tmp/recovery-alternate-rootfs.itb", id.bytes+1024ULL*1024, 60000, 15)) {
         log_message("alternate rootfs download failed; standby repair deferred");
         unlink("/tmp/recovery-alternate-rootfs.itb");
         return;
@@ -523,18 +528,13 @@ int fwctl_recovery_main(int argc, char **argv)
         }
         if (!id.firmware_id[0] && firmware_id_read(id.firmware_id))
             halt_recovery("complete version+hash identity unavailable; refusing ambiguous network recovery");
-        char url[640], size[32], limit[32];
+        char url[640], size[32];
         snprintf(url,sizeof(url),"%s/recovery/%s/rootfs/%u/%s/%s/rootfs.itb",
             s.server,s.hwid,version,id.firmware_id,id.payload);
         snprintf(size,sizeof(size),"%u",id.bytes);
-        snprintf(limit,sizeof(limit),"%llu",(unsigned long long)id.bytes + 1024*1024);
         unlink("/tmp/recovery-rootfs.itb");
         log_message("requesting exact rootfs payload from OTA server");
-        char *get[]={"/usr/bin/curl","--disable","--fail","--show-error","--noproxy","*",
-            "--proto","=http,https","--connect-timeout","10","--max-time","900",
-            "--speed-limit","1024","--speed-time","30","--max-filesize",limit,
-            "--output","/tmp/recovery-rootfs.itb","--url",url,NULL};
-        if (!run(get,NULL,0)) {
+        if (!fetch_rootfs(url, "/tmp/recovery-rootfs.itb", (uint64_t)id.bytes+1024*1024, 900000, 30)) {
             char *restore[]={"/usr/sbin/fwctl","recovery","restore","/tmp/recovery-rootfs.itb",size,id.payload,NULL};
             log_message("validating package and repairing unmounted rootfs; watchdog servicing remains active");
             if (!run(restore,NULL,0)) {

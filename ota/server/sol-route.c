@@ -30,19 +30,8 @@ bool sol_route_client(int client, const struct server_context *context,
         return true;
     }
 
-    struct timeval timeout = {.tv_sec = 2};
-    (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    size_t received = 0;
-    time_t deadline = time(NULL) + 5;
-    while (received < request->length && time(NULL) <= deadline) {
-        ssize_t count = recv(client, body + received, (size_t)request->length - received, 0);
-        if (count < 0 && errno == EINTR)
-            continue;
-        if (count <= 0)
-            break;
-        received += (size_t)count;
-    }
-    if (received != request->length) {
+    size_t received = (size_t)request->length;
+    if (dm_transfer_receive_exact(client, body, received, 5000, NULL)) {
         http_json(client, 400, "Bad Request", "{\"error\":\"Incomplete log batch\"}", request->head);
         return true;
     }

@@ -32,39 +32,10 @@ static int open_artifact(int root, const char *name, struct stat *st)
     return fd;
 }
 
-/* OTA clients resume with the single open-ended form: Range: bytes=N-. */
-static int range_start(const char *value, uintmax_t *start)
+static int transfer_stopped(void *context)
 {
-    if (!value || strncmp(value, "bytes=", 6))
-        return -1;
-    const char *p = value + 6;
-    if (!*p || *p < '0' || *p > '9')
-        return -1;
-    uintmax_t n = 0;
-    do {
-        unsigned digit = (unsigned)(*p - '0');
-        if (n > (UINTMAX_MAX - digit) / 10)
-            return -1;
-        n = n * 10 + digit;
-        p++;
-    } while (*p >= '0' && *p <= '9');
-    if (strcmp(p, "-"))
-        return -1;
-    *start = n;
-    return 0;
+    const struct server_context *server = context; return !*server->running;
 }
-
-static void range_error(int client, uintmax_t size)
-{
-    char header[192];
-    int n = snprintf(header, sizeof(header),
-        "HTTP/1.1 416 Range Not Satisfiable\r\n"
-        "Content-Range: bytes */%ju\r\nContent-Length: 0\r\n"
-        "Connection: close\r\nCache-Control: no-store\r\n\r\n", size);
-    if (n > 0 && n < (int)sizeof(header))
-        (void)http_send_all(client, header, (size_t)n);
-}
-
 static void index_page(int client, bool head)
 {
     if (!http_headers(client, 200, "OK", "text/html; charset=utf-8", sizeof(admin_page) - 1) && !head)
@@ -79,39 +50,10 @@ static void upload(int client, unsigned long long length, const struct server_co
         http_json(client, 503, "Service Unavailable", "{\"error\":\"无法创建上传目录，请检查空间或清理旧草稿（最多 256 个）。\"}", false);
         return;
     }
-    char buffer[65536];
-    unsigned long long left = length;
-    time_t started = time(NULL);
-    int failed = 0;
-    while (left && (*context->running)) {
-        size_t wanted = left < sizeof(buffer) ? (size_t)left : sizeof(buffer);
-        ssize_t n = recv(client, buffer, wanted, 0);
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0 || time(NULL) - started > 180) {
-            failed = 1;
-            break;
-        }
-        size_t pos = 0;
-        while (pos < (size_t)n) {
-            ssize_t written = write(fd, buffer + pos, (size_t)n - pos);
-            if (written < 0 && errno == EINTR)
-                continue;
-            if (written <= 0) {
-                failed = 1;
-                break;
-            }
-            pos += (size_t)written;
-        }
-        if (failed)
-            break;
-        left -= (unsigned long long)n;
-    }
-    if (fsync(fd))
-        failed = 1;
-    if (close(fd))
-        failed = 1;
-    if (failed || left) {
+    struct dm_transfer_callbacks callbacks = {.cancelled=transfer_stopped,.context=(void *)context};
+    int failed = dm_transfer_receive_file(client, fd, length, OTA_UPLOAD_MAX, 180000, &callbacks);
+    if (close(fd)) failed = 1;
+    if (failed) {
         ota_draft_cleanup(temp);
         http_json(client, 400, "Bad Request", "{\"error\":\"上传未完成，请重试。\"}", false);
         return;
@@ -208,16 +150,12 @@ void server_route_client(int client, const struct server_context *context)
                 http_text(client, 400, "Bad Request", "Invalid report\n", false);
                 return;
             }
-            size_t received = 0;
-            while (received < length) {
-                ssize_t n = recv(client, body + received, (size_t)length - received, 0);
-                if (n < 0 && errno == EINTR) continue;
-                if (n <= 0) return;
-                received += (size_t)n;
+            if (dm_transfer_receive_exact(client, body, (size_t)length, 15000, NULL)) {
+                http_text(client, 400, "Bad Request", "Incomplete report\n", false); return;
             }
-            body[received] = 0;
+            body[length] = 0;
             struct ota_report report;
-            if (memchr(body, 0, received) || ota_report_parse(body, &report) || strcmp(report.device, id) ||
+            if (memchr(body, 0, (size_t)length) || ota_report_parse(body, &report) || strcmp(report.device, id) ||
                 (download_device && strcmp(download_device, id)) || !request.hwid || strcmp(report.hwid, request.hwid))
                 http_text(client, 400, "Bad Request", "Invalid report\n", false);
             else if (!ota_report_targets(context->directory, &report))
@@ -289,7 +227,7 @@ void server_route_client(int client, const struct server_context *context)
         return;
     }
     if (!strncmp(path, "/api/download/", 14)) {
-        char kind[16], id[64], extra, canonical[128], filename[128], header[512];
+        char kind[16], id[64], extra, canonical[128], filename[128];
         unsigned long long bytes;
         if (sscanf(path, "/api/download/%15[^/]/%63s%c", kind, id, &extra) != 2) {
             http_text(client, 404, "Not Found", "Firmware unavailable\n", head); return;
@@ -300,16 +238,10 @@ void server_route_client(int client, const struct server_context *context)
         if (bundle < 0) {
             http_text(client, bundle == -ENOENT ? 404 : 503, "Unavailable", "Cannot export verified firmware package\n", head); return;
         }
-        int n = snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
-            "Content-Disposition: attachment; filename=\"%s\"\r\nContent-Length: %llu\r\n"
-            "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n", filename, bytes);
-        if (n > 0 && n < (int)sizeof(header) && !http_send_all(client, header, (size_t)n) && !head) {
-            char buffer[65536]; ssize_t got;
-            while ((*context->running) && (got = read(bundle, buffer, sizeof(buffer))) != 0) {
-                if (got < 0 && errno == EINTR) continue;
-                if (got < 0 || http_send_all(client, buffer, (size_t)got)) break;
-            }
-        }
+        struct dm_transfer_serve serve = {.socket=client,.fd=bundle,.head=head,.size=bytes,
+            .range=requested_range,.content_type="application/gzip",.filename=filename,
+            .callbacks={.cancelled=transfer_stopped,.context=(void *)context}};
+        (void)dm_transfer_serve_file(&serve);
         close(bundle); return;
     }
     if (!strcmp(path, "/") || !strcmp(path, "/firmware")) {
@@ -475,55 +407,14 @@ void server_route_client(int client, const struct server_context *context)
         http_text(client, 404, "Not Found", "Artifact unavailable\n", head);
         return;
     }
-    uintmax_t offset = 0;
-    bool partial = requested_range != NULL;
-    if (partial && (range_start(requested_range, &offset) ||
-                    offset >= (uintmax_t)st.st_size)) {
-        range_error(client, (uintmax_t)st.st_size);
-        close(fd);
-        return;
-    }
-    uintmax_t response_size = (uintmax_t)st.st_size - offset;
-    char response_header[320];
-    int header_size;
-    if (partial) {
-        header_size = snprintf(response_header, sizeof(response_header),
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\n"
-            "Content-Length: %ju\r\nContent-Range: bytes %ju-%ju/%ju\r\n"
-            "Accept-Ranges: bytes\r\nCache-Control: no-store\r\n"
-            "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
-            response_size, offset, (uintmax_t)st.st_size - 1,
-            (uintmax_t)st.st_size);
-    } else {
-        header_size = snprintf(response_header, sizeof(response_header),
-            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-            "Content-Length: %ju\r\nAccept-Ranges: bytes\r\n"
-            "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
-            "Connection: close\r\n\r\n", response_size);
-    }
-    if (header_size > 0 && header_size < (int)sizeof(response_header) &&
-        !http_send_all(client, response_header, (size_t)header_size) && !head) {
-        if (lseek(fd, (off_t)offset, SEEK_SET) < 0) {
-            close(fd);
-            return;
-        }
-        char buffer[65536];
-        uintmax_t remaining = response_size;
-        while (remaining > 0 && (*context->running)) {
-            size_t wanted = remaining < sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
-            ssize_t count = read(fd, buffer, wanted);
-            if (count < 0 && errno == EINTR)
-                continue;
-            if (count <= 0 || http_send_all(client, buffer, (size_t)count))
-                break;
-            remaining -= count;
-        }
-        if (!remaining && !strcmp(name, "rootfs.itb")) {
-            unsigned long long publication;
-            if (sscanf(path, "/releases/%llu/", &publication) == 1 &&
-                ota_catalog_download(context->directory, publication, download_device))
-                fprintf(stderr, "[device-server] [ERROR] Cannot record completed download for #%llu\n", publication);
-        }
+    struct dm_transfer_serve serve = {.socket=client,.fd=fd,.head=head,.size=(uint64_t)st.st_size,
+        .range=requested_range,.callbacks={.cancelled=transfer_stopped,.context=(void *)context}};
+    int sent = dm_transfer_serve_file(&serve);
+    if (!sent && !head && !strcmp(name, "rootfs.itb")) {
+        unsigned long long publication;
+        if (sscanf(path, "/releases/%llu/", &publication) == 1 &&
+            ota_catalog_download(context->directory, publication, download_device))
+            fprintf(stderr, "[device-server] [ERROR] Cannot record completed download for #%llu\n", publication);
     }
     close(fd);
 }

@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -17,9 +19,14 @@ class NetworkGate(unittest.TestCase):
         self.state.write_text('down')
         self.calls = self.root/'calls'
         self.bin = self.root/'bin'; self.bin.mkdir()
-        curl = self.bin/'curl'
-        curl.write_text('#!/bin/sh\necho request >> "$TEST_CALLS"\nexit 22\n')
-        curl.chmod(0o755)
+        calls=self.calls
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                with calls.open('a') as f:f.write('request\n')
+                self.send_response(503);self.end_headers()
+            def log_message(self,*args):pass
+        self.http=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        self.worker=threading.Thread(target=self.http.serve_forever,daemon=True);self.worker.start()
         fixture = self.root/'interfaces.c'
         fixture.write_text(r'''
 #define _DEFAULT_SOURCE
@@ -59,9 +66,10 @@ void freeifaddrs(struct ifaddrs *p) { (void)p; }
         preload = self.root/'interfaces.so'
         subprocess.run(['cc','-Wall','-Wextra','-Werror','-shared','-fPIC',str(fixture),'-o',str(preload)],check=True)
         self.env = dict(os.environ, LD_PRELOAD=str(preload), TEST_NETWORK_STATE=str(self.state), TEST_CALLS=str(self.calls), PATH=str(self.bin)+':'+os.environ['PATH'])
-        self.args = [str(SOURCE/'fwctld'),'--server','http://127.0.0.1:1','--cache',str(self.root/'cache'),'--hwid','1010001000110000','--interface','test0','--interval','1']
+        self.args = [str(SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.http.server_port}','--cache',str(self.root/'cache'),'--hwid','1010001000110000','--interface','test0','--interval','1']
 
     def tearDown(self):
+        self.http.shutdown();self.worker.join();self.http.server_close()
         self.temp.cleanup()
 
     def test_unready_never_calls_http(self):

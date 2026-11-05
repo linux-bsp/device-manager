@@ -3,7 +3,7 @@
 #include "time-control.h"
 #include "time-sync.h"
 #include "../ota/shared/time-source.h"
-#include <curl/curl.h>
+#include "dm/transfer.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -54,29 +54,21 @@ static int save(const struct settings *s)
     return -error;
 }
 struct response {char body[2048];size_t length;};
-static size_t receive(char *data,size_t a,size_t b,void *arg)
-{
-    struct response *r=arg;size_t n=a*b;if(n>=sizeof(r->body)-r->length)return 0;
-    memcpy(r->body+r->length,data,n);r->length+=n;r->body[r->length]=0;return n;
-}
-static int progress(void *p,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d)
-{(void)p;(void)a;(void)b;(void)c;(void)d;return cancelled?1:0;}
+static int transfer_cancelled(void *context) { (void)context; return cancelled != 0; }
 static int exchange(const char *server,const char *device,const char *key,const char *body,struct response *r)
 {
     char url[1024],auth[96];if(snprintf(url,sizeof(url),"%s/api/clock/device/%s",server,device)>=(int)sizeof(url))return -EINVAL;
-    CURL *c=curl_easy_init();if(!c)return -ENOMEM;
-    struct curl_slist *h=NULL;
-    if(*key){snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);h=curl_slist_append(h,auth);}
-    h=curl_slist_append(h,"Content-Type: text/plain");h=curl_slist_append(h,"Expect:");
-    curl_easy_setopt(c,CURLOPT_URL,url);curl_easy_setopt(c,CURLOPT_HTTPHEADER,h);
-    if(body){curl_easy_setopt(c,CURLOPT_POSTFIELDS,body);curl_easy_setopt(c,CURLOPT_POSTFIELDSIZE,(long)strlen(body));}
-    curl_easy_setopt(c,CURLOPT_WRITEFUNCTION,receive);curl_easy_setopt(c,CURLOPT_WRITEDATA,r);
-    curl_easy_setopt(c,CURLOPT_CONNECTTIMEOUT_MS,1000L);curl_easy_setopt(c,CURLOPT_TIMEOUT_MS,2000L);
-    curl_easy_setopt(c,CURLOPT_NOSIGNAL,1L);curl_easy_setopt(c,CURLOPT_NOPROXY,"*");curl_easy_setopt(c,CURLOPT_PROTOCOLS_STR,"http,https");
-    curl_easy_setopt(c,CURLOPT_XFERINFOFUNCTION,progress);curl_easy_setopt(c,CURLOPT_NOPROGRESS,0L);
-    CURLcode result=curl_easy_perform(c);long status=0;curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,&status);
-    curl_slist_free_all(h);curl_easy_cleanup(c);
-    return cancelled?-ECANCELED:result==CURLE_OK&&status==200?0:-EHOSTUNREACH;
+    const char *headers[2];size_t n=0;
+    if(*key){snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);headers[n++]=auth;}
+    headers[n++]="Content-Type: text/plain";
+    struct dm_transfer_request request;struct dm_transfer_result response;
+    dm_transfer_request_init(&request);
+    request.url=url;request.headers=headers;request.header_count=n;
+    if(body){request.method="POST";request.body=body;request.body_size=strlen(body);}
+    request.response=r->body;request.response_capacity=sizeof(r->body);
+    request.connect_timeout_ms=1000;request.timeout_ms=2000;request.callbacks.cancelled=transfer_cancelled;
+    int rc=dm_transfer_perform(&request,&response);r->length=response.response_size;
+    return cancelled?-ECANCELED:!rc&&response.http_status==200?0:-EHOSTUNREACH;
 }
 static void report(const char *server,const char *device,const char *key,const char *source)
 {

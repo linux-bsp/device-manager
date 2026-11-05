@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import shutil
+from build_support import transfer_flags
 import subprocess
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ class Cache(unittest.TestCase):
                         '-I'+str(SOURCE/'agent'),'-I'+str(SOURCE/'shared'),
                         '-I'+str(SOURCE.parent/'identity/include'),str(main),
                         str(SOURCE/'agent/fwctld-cache.c'),str(SOURCE/'shared/ota-common.c'),
-                        '-o',str(cls.binary)],check=True)
+                        ]+transfer_flags()+['-o',str(cls.binary)],check=True)
     @classmethod
     def tearDownClass(cls): cls.build.cleanup()
     def setUp(self):

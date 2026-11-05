@@ -64,15 +64,8 @@ static void list(int client,sqlite3 *db,bool head)
 static int read_body(int client,const struct http_request *r,char body[2048])
 {
     if(!r->has_length||r->length==0||r->length>=2048||r->expect)return -1;
-    struct timeval timeout={.tv_sec=2};setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
-    size_t got=0;struct timespec start,now;clock_gettime(CLOCK_MONOTONIC,&start);
-    while(got<r->length){
-        clock_gettime(CLOCK_MONOTONIC,&now);if(now.tv_sec-start.tv_sec>5)return -1;
-        ssize_t n=recv(client,body+got,(size_t)r->length-got,0);
-        if(n<0&&errno==EINTR)continue;
-        if(n<=0)return -1;
-        got+=(size_t)n;
-    }
+    size_t got=(size_t)r->length;
+    if(dm_transfer_receive_exact(client,body,got,5000,NULL))return -1;
     if(memchr(body,0,got))return -1;
     body[got]=0;return 0;
 }

@@ -4,7 +4,7 @@
 #include "startup-forward.h"
 #include "time-sync.h"
 #include "time-control.h"
-#include <curl/curl.h>
+#include "dm/transfer.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -62,31 +62,21 @@ static int config(void)
     for(int i=0;i<64;i++)if(!((key[i]>='0'&&key[i]<='9')||(key[i]>='a'&&key[i]<='f')))return -1;
     return 0;
 }
-struct response{char b[512];size_t n;};
-static size_t receive(char *p,size_t a,size_t b,void *opaque)
-{
-    struct response *r=opaque;size_t n=a*b;if(n>=sizeof(r->b)-r->n)return 0;
-    memcpy(r->b+r->n,p,n);r->n+=n;r->b[r->n]=0;return n;
-}
-static int progress(void *p,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d){(void)p;(void)a;(void)b;(void)c;(void)d;return stopped?1:0;}
+static int transfer_cancelled(void *context) { (void)context; return stopped != 0; }
 static int post_url(const char *url,const char *data,size_t length,long long *next)
 {
-    char auth[96];
-    CURL *c=curl_easy_init();if(!c)return -1;
-    snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);
-    struct curl_slist *h=NULL;if(*key)h=curl_slist_append(h,auth);h=curl_slist_append(h,"Content-Type: application/octet-stream");h=curl_slist_append(h,"Expect:");
-    struct response r={0};
-    curl_easy_setopt(c,CURLOPT_URL,url);curl_easy_setopt(c,CURLOPT_HTTPHEADER,h);
-    curl_easy_setopt(c,CURLOPT_POSTFIELDS,data);curl_easy_setopt(c,CURLOPT_POSTFIELDSIZE,(long)length);
-    curl_easy_setopt(c,CURLOPT_WRITEFUNCTION,receive);curl_easy_setopt(c,CURLOPT_WRITEDATA,&r);
-    curl_easy_setopt(c,CURLOPT_CONNECTTIMEOUT,2L);curl_easy_setopt(c,CURLOPT_TIMEOUT,5L);
-    curl_easy_setopt(c,CURLOPT_NOSIGNAL,1L);curl_easy_setopt(c,CURLOPT_NOPROXY,"*");
-    curl_easy_setopt(c,CURLOPT_XFERINFOFUNCTION,progress);curl_easy_setopt(c,CURLOPT_NOPROGRESS,0L);
-    curl_easy_setopt(c,CURLOPT_PROTOCOLS_STR,"http,https");
-    CURLcode result=curl_easy_perform(c);long status=0;curl_easy_getinfo(c,CURLINFO_RESPONSE_CODE,&status);
-    curl_slist_free_all(h);curl_easy_cleanup(c);
-    char extra;
-    if(result!=CURLE_OK||(status!=200&&status!=409)||sscanf(r.b,"{\"next\":%lld}%c",next,&extra)!=1||*next<0||*next>4*1024*1024)return -1;
+    char auth[96],body[512],extra; const char *headers[2]; size_t count=0;
+    if(*key){snprintf(auth,sizeof(auth),"Authorization: Bearer %s",key);headers[count++]=auth;}
+    headers[count++]="Content-Type: application/octet-stream";
+    struct dm_transfer_request request; struct dm_transfer_result response;
+    dm_transfer_request_init(&request);
+    request.url=url;request.method="POST";request.body=data;request.body_size=length;
+    request.headers=headers;request.header_count=count;request.response=body;request.response_capacity=sizeof(body);
+    request.connect_timeout_ms=2000;request.timeout_ms=5000;request.callbacks.cancelled=transfer_cancelled;
+    int rc=dm_transfer_perform(&request,&response);
+    if(rc)return rc;
+    if((response.http_status!=200&&response.http_status!=409)||
+       sscanf(body,"{\"next\":%lld}%c",next,&extra)!=1||*next<0||*next>4*1024*1024)return -EPROTO;
     return 0;
 }
 static int post_path(const char *path,const char *data,size_t length,long long *next)
@@ -99,24 +89,25 @@ static int post(const char *boot,long long order,const char *stage,long long gen
     char path[512];int k=snprintf(path,sizeof(path),"/api/sol/push/%s/%s/%lld/%s/%lld/%lld",device,boot,order,stage,gen,off);
     return k<0||k>=(int)sizeof(path)?-1:post_path(path,data,length,next);
 }
+struct log_push_context { const char *boot,*stage; long long order,generation; };
+static int push_chunk(void *context,uint64_t offset,const void *data,size_t length,uint64_t *next)
+{
+    struct log_push_context *log=context;long long acknowledged;
+    int rc=post(log->boot,log->order,log->stage,log->generation,(long long)offset,data,length,&acknowledged);
+    if (!rc) *next = (uint64_t)acknowledged;
+    return rc;
+}
 static int upload_file(const char *path,const char *boot,long long order,const char *stage)
 {
-    int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return errno==ENOENT?0:-1;
-    struct stat st;if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size>4*1024*1024){close(fd);return -1;}
-    char buf[4097];ssize_t n=pread(fd,buf,127,0);if(n<=0){close(fd);return 0;}buf[n]=0;
-    long long gen=0,off=0;if(sscanf(buf,"[seq=%lld",&gen)!=1||gen<1){close(fd);return -1;}
-    /* Durable server cursor is authoritative even after either side restarts. */
-    if(post(boot,order,stage,gen,0,"",0,&off)){close(fd);return -1;}
-    if(off>st.st_size){close(fd);return -1;}
-    for(int batch=0;batch<32&&!stopped;batch++) {
-        if(off>=st.st_size)break;
-        size_t wanted=(size_t)(st.st_size-off);if(wanted>4096)wanted=4096;
-        n=pread(fd,buf,wanted,off);if(n<0){close(fd);return -1;}if(!n)break;
-        long long next;
-        if(post(boot,order,stage,gen,off,buf,(size_t)n,&next)){close(fd);return -1;}
-        if(next<=off||next>st.st_size){close(fd);return -1;}off=next;
-    }
-    close(fd);return 0;
+    int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK);if(fd<0)return errno==ENOENT?0:-1;
+    struct stat st;if(fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_size<0||st.st_size>4*1024*1024){close(fd);return -1;}
+    char first[128];ssize_t n=pread(fd,first,sizeof(first)-1,0);
+    if(n<=0){close(fd);return n<0?-1:0;}first[n]=0;
+    struct log_push_context context={.boot=boot,.stage=stage,.order=order};
+    if(sscanf(first,"[seq=%lld",&context.generation)!=1||context.generation<1){close(fd);return -1;}
+    struct dm_transfer_push push={.fd=fd,.size=(uint64_t)st.st_size,.chunk_size=4096,.max_chunks=32,
+        .exchange=push_chunk,.context=&context,.callbacks={.cancelled=transfer_cancelled}};
+    uint64_t next;int rc=dm_transfer_push_file(&push,&next);close(fd);return rc<0?-1:0;
 }
 struct boot {char name[64];long long order;};
 static int compare(const void *a,const void *b){const struct boot *x=a,*y=b;return x->order>y->order?-1:x->order<y->order?1:0;}
@@ -169,7 +160,7 @@ int sol_forward(const char *root)
     char path[P];if(snprintf(path,sizeof(path),"%s/.sol-lock",root)>=(int)sizeof(path))return 2;
     int lock=open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0600);if(lock<0||flock(lock,LOCK_EX|LOCK_NB))return 1;
     signal(SIGTERM,stop_forward);signal(SIGINT,stop_forward);signal(SIGPIPE,SIG_IGN);
-    curl_global_init(CURL_GLOBAL_DEFAULT);int state=-1;
+    int state=-1;
     while(!stopped){
         if(clock_enabled)dm_clock_cycle(server,interface,device,key);
         if(stopped)break;
@@ -179,15 +170,14 @@ int sol_forward(const char *root)
         if(result!=state){fprintf(stderr,"[logctld] [%s] SOL %s\n",result?"WARN":"INFO",result?"unavailable; local collection continues, retrying":"connected; log forwarding active");state=result;}
         for(int i=0;i<20&&!stopped;i++)usleep(250000);
     }
-    curl_global_cleanup();close(lock);return 0;
+    close(lock);return 0;
 }
 
 int sol_sync_time(void)
 {
     if(config()){fprintf(stderr,"[logctl] [ERROR] valid SOL server configuration required for time sync\n");return 1;}
-    curl_global_init(CURL_GLOBAL_DEFAULT);
     char source[512]="-";int enabled=1;unsigned interval=3600;
     (void)dm_clock_local(source,&enabled,&interval);dm_time_interval(interval);
     int result=dm_time_sync(strcmp(source,"-")?source:server,interface,1);
-    curl_global_cleanup();return result?1:0;
+    return result?1:0;
 }

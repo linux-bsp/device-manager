@@ -19,125 +19,49 @@ static void stop_daemon(int sig)
     ota_stop = 1;
 }
 
-/* Never promote a file until both its data and parent entry are synced. */
 static int sync_download_file(const char *path)
 {
-    char directory[OTA_PATH];
-    if(strlen(path)>=sizeof(directory)){errno=ENAMETOOLONG;return -1;}
-    strcpy(directory,path);
-    char *slash=strrchr(directory,'/');
-    if(!slash){errno=EINVAL;return -1;}
-    if(slash==directory)slash[1]='\0';else *slash='\0';
-    int fd=open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0644);
-    if(fd<0)return -1;
-    struct stat st;
-    int rc=fstat(fd,&st);
-    if(!rc&&!S_ISREG(st.st_mode)){errno=EINVAL;rc=-1;}
-    if(!rc)rc=fsync(fd);
-    int error=errno;
-    if(close(fd)&&!rc){rc=-1;error=errno;}
-    if(!rc&&ota_sync_dir(directory)){rc=-1;error=errno;}
-    if(rc)fwctld_error("Cache synchronization failed for %s: %s; file is not ready for installation",path,strerror(error));
-    errno=error;return rc;
+    int rc = dm_transfer_sync_file(path);
+    if (rc) fwctld_error("Cache synchronization failed; file is not ready for installation");
+    return rc;
 }
-
+struct download_progress {
+    const char *file;
+    struct dm_transfer_result *result;
+    int notified;
+};
+static void resumed(void *context, uint64_t done, uint64_t total)
+{
+    struct download_progress *p = context; (void)done; (void)total;
+    if (!p->notified && p->result->resume_from) {
+        fwctld_log("Resuming %s at byte %llu", p->file, (unsigned long long)p->result->resume_from);
+        p->notified = 1;
+    }
+}
 static int download(const char *url, const char *path, unsigned long long limit,
                     const char *expected_hash, int resume, int allow_absent,
                     const char *device)
 {
-    char maximum[32], status[16];
     (void)device;
-    snprintf(maximum, sizeof(maximum), "%llu", limit);
-    unsigned long long offset = 0;
-    if (resume) {
-        int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-        if (fd >= 0) {
-            struct stat st;
-            if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) {
-                close(fd);
-                return -EIO;
-            }
-            offset = (unsigned long long)st.st_size;
-            close(fd);
-            if (offset > limit) {
-                if (unlink(path)) return -EIO;
-                offset = 0;
-            } else if (offset == limit) {
-                char hash[65]; unsigned long long size;
-                if (!ota_hash(path, hash, &size) && size == limit &&
-                    expected_hash && !strcmp(hash, expected_hash)) {
-                    if(sync_download_file(path))return -EIO;
-                    const char *file = strrchr(url, '/');
-                    fwctld_log("Reusing SHA256-verified cached file %s", file ? file + 1 : url);
-                    return 0;
-                }
-                if (unlink(path)) return -EIO;
-                offset = 0;
-            }
-        } else if (errno != ENOENT) {
-            return -EIO;
-        }
-        if(sync_download_file(path))return -EIO;
-    }
-    if (offset) {
-        const char *file = strrchr(url, '/');
-        fwctld_log("Resuming %s at byte %llu", file ? file + 1 : url, offset);
-    }
-    char *args[40]; unsigned n = 0;
-    args[n++] = "curl"; args[n++] = "--disable"; args[n++] = "--silent";
-    args[n++] = "--show-error"; args[n++] = "--noproxy"; args[n++] = "*";
-    args[n++] = "--proto"; args[n++] = "=http,https";
-    args[n++] = "--connect-timeout"; args[n++] = "10";
-    args[n++] = "--max-time"; args[n++] = "1800";
-    args[n++] = "--speed-limit"; args[n++] = "1024";
-    args[n++] = "--speed-time"; args[n++] = "30";
-    args[n++] = "--max-filesize"; args[n++] = maximum;
-    if (resume && offset) { args[n++] = "--continue-at"; args[n++] = "-"; }
-    args[n++] = "--output"; args[n++] = (char *)path;
-    args[n++] = "--write-out"; args[n++] = "%{http_code}";
-    args[n++] = "--url"; args[n++] = (char *)url; args[n] = NULL;
-    int request_status = fwctld_request_status(args, status, sizeof(status));
-    if (request_status) {
-        if(sync_download_file(path)) {
-            fwctld_error("Partial download retained without durability confirmation");
-            return -EIO;
-        }
-        fwctld_error("Download interrupted at byte %llu; partial data retained for resume", offset);
-        if (request_status == 23 || request_status == 26 || request_status == 27)
-            return -EIO;
-        if (request_status == 63) return -EBADMSG;
-        return -EAGAIN;
-    }
-    if (allow_absent && (!strcmp(status, "404") || !strcmp(status, "204"))) return 1;
-    if ((!offset && strcmp(status, "200")) || (offset && strcmp(status, "206"))) {
-        fwctld_error("HTTP %s while resuming %s at byte %llu", status, url, offset);
-        return -EAGAIN;
-    }
-    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-    if (fd < 0) return -EIO;
-    int rc = 0;
-    struct stat st;
-    if (fstat(fd, &st) || !S_ISREG(st.st_mode)) rc = -EIO;
-    else if (st.st_size < 0 || (unsigned long long)st.st_size > limit) rc = -EBADMSG;
-    else if (!st.st_size || (expected_hash && (unsigned long long)st.st_size != limit)) rc = -EAGAIN;
-    if(close(fd))rc=-EIO;
-    if(sync_download_file(path))return -EIO;
+    struct dm_transfer_download options = {0}; struct dm_transfer_result result = {0};
+    fwctld_request_init(&options.request);
+    const char *file = strrchr(url, '/');
+    struct download_progress progress = {.file = file ? file+1 : url, .result = &result};
+    options.request.url = url; options.request.connect_timeout_ms = 10000; options.request.timeout_ms = 1800000;
+    options.request.low_speed_bytes = 1024; options.request.low_speed_seconds = 30;
+    options.request.callbacks.progress = resumed; options.request.callbacks.context = &progress;
+    options.path = path; options.maximum = limit; options.size = expected_hash ? limit : 0;
+    options.sha256 = expected_hash; options.resume = resume;
+    int rc = dm_transfer_download_file(&options, &result);
+    if (allow_absent && (result.http_status == 404 || result.http_status == 204)) return 1;
     if (rc) {
-        fwctld_error("Downloaded size does not match manifest for %s; partial data retained", url);
+        fwctld_error("Download failed (%s); durable bytes retained: %llu", dm_transfer_error_name(result.kind),
+                      (unsigned long long)result.durable_bytes);
+        if (result.kind == DM_TRANSFER_STORAGE) return -EIO;
+        if (result.kind == DM_TRANSFER_INTEGRITY) return -EBADMSG;
         return rc;
     }
-    char hash[65]; unsigned long long size;
-    if (expected_hash && ota_hash(path, hash, &size)) return -EIO;
-    if (expected_hash && (size != limit || strcmp(hash, expected_hash))) {
-        char parent[OTA_PATH];
-        if (snprintf(parent, sizeof(parent), "%s", path) >= (int)sizeof(parent)) return -EIO;
-        char *slash = strrchr(parent, '/');
-        if (!slash || unlink(path)) return -EIO;
-        if (slash == parent) slash[1] = '\0'; else *slash = '\0';
-        if (ota_sync_dir(parent)) return -EIO;
-        fwctld_error("SHA256 mismatch for %s; discarded partial file", url);
-        return -EBADMSG;
-    }
+    if (result.cached) fwctld_log("Reusing SHA256-verified cached file %s", progress.file);
     return 0;
 }
 

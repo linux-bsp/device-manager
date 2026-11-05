@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import unittest
+from transport_fixture import FaultProxy
 
 spec = importlib.util.spec_from_file_location('admin_tests', Path(__file__).with_name('test-admin.py'))
 admin = importlib.util.module_from_spec(spec)
@@ -45,6 +46,8 @@ class AutomaticOTA(unittest.TestCase):
             TEST_CORRUPT=str(self.root/'corrupt'), TEST_SNAPSHOT=str(self.snapshot), TEST_CALLS=str(self.calls), TEST_FAIL=str(self.fail_marker),
             TEST_ACTIVE_ID='a'*64, TEST_TARGET_ID='b'*64, TEST_TARGET_VERSION='65537')
         self.publish(self.draft())
+        self.proxy = FaultProxy(self.port)
+        self.addCleanup(self.proxy.close)
 
     def write_snapshot(self, status):
         if status.startswith('FWOTA1 '):
@@ -68,7 +71,7 @@ class AutomaticOTA(unittest.TestCase):
         return status, body
 
     def agent(self, ok=True, force=False, extra=()):
-        r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.port}',
+        r = subprocess.run([str(admin.SOURCE / 'fwctld'), '--server', f'http://127.0.0.1:{self.proxy.port}',
             '--cache', str(self.root/'cache'), '--hwid', '1010001000110000',
             '--state-dir', str(self.root/'state'),
             '--auto-install', '--device', 'board-01', '--once'] + (['--force'] if force else []) + list(extra), env=self.env, capture_output=True, text=True)
@@ -81,12 +84,8 @@ class AutomaticOTA(unittest.TestCase):
         log=self.root/'agent.log'
         download_wait=self.root/'download-wait';download_go=self.root/'download-go'
         install_wait=self.root/'install-wait';install_go=self.root/'install-go'
-        curl=self.bin/'curl'
-        real_curl=shutil.which('curl',path=admin.ENV['PATH'])
-        curl.write_text('#!/bin/sh\ncase "$*" in *"/releases/1/kernel.itb"*)\n'
-            f'touch "{download_wait}"\nwhile [ ! -e "{download_go}" ]; do sleep .05; done;;\nesac\n'
-            f'exec "{real_curl}" "$@"\n')
-        curl.chmod(0o755)
+        self.proxy.add(self.root/'pause-download', suffix='/releases/1/kernel.itb',
+                       seen=download_wait, wait=download_go)
         fw=self.bin/'fwctl';text=fw.read_text().replace('update) echo install',
             f'update) echo FLASH_WRITE_BEGIN; echo FLASH_ERROR_DETAIL >&2; touch "{install_wait}"; '
             f'while [ ! -e "{install_go}" ]; do sleep .05; done; echo install')
@@ -97,7 +96,7 @@ class AutomaticOTA(unittest.TestCase):
                 time.sleep(.02)
             self.fail('Expected progress before blocked operation completes')
         with log.open('w') as stream:
-            proc=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.port}',
+            proc=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.proxy.port}',
                 '--cache',str(self.root/'cache'),'--hwid', '1010001000110000',
                 '--auto-install','--device','board-01','--console',str(console),'--once'],env=self.env,stdout=stream,stderr=stream)
             try:
@@ -140,15 +139,11 @@ class AutomaticOTA(unittest.TestCase):
         self.assertTrue(list(self.journal_directory().glob('*.event')))
 
     def disconnect_server(self):
-        wrapper=self.bin/'curl'
-        wrapper.write_text('#!/bin/sh\nexit 7\n');wrapper.chmod(0o755)
-        return wrapper
+        return self.proxy.add(self.root/'offline', drop=True)
 
     def reject_payload_requests(self):
-        curl=self.bin/'curl';real=shutil.which('curl',path=admin.ENV['PATH'])
         self.unexpected_download=self.root/'unexpected-download'
-        curl.write_text('#!/bin/sh\ncase "$*" in *".itb"*) echo unexpected > "'+str(self.unexpected_download)+'"; exit 22;; esac\nexec "'+real+'" "$@"\n')
-        curl.chmod(0o755)
+        self.proxy.add(self.root/'reject-payload',suffix='.itb',seen=self.unexpected_download,drop=True)
 
     def test_auto_success_waits_for_confirmation(self):
         self.agent()
@@ -200,25 +195,17 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.state()['latest'], 0)
 
     def inject_download_failure(self, mode):
-        source = self.root/'kernel-fixture'
-        source.write_bytes(self.files['kernel.itb'])
-        real_curl = shutil.which('curl', path=admin.ENV['PATH'])
-        wrapper = self.bin/'curl'
-        wrapper.write_text(f'#!{sys.executable}\n' +
-            'import os,sys\nfrom pathlib import Path\n'
-            'args=sys.argv[1:]\n'
-            'url=args[args.index("--url")+1]\n'
-            'if url.endswith("/releases/1/kernel.itb"):\n'
-            ' output=Path(args[args.index("--output")+1])\n'
-            f' payload=Path({str(source)!r}).read_bytes()\n'
-            f' mode={mode!r}\n'
-            ' if mode=="storage":sys.exit(23)\n'
-            ' if mode=="partial":\n'
-            '  output.write_bytes(payload[:len(payload)//2]);print("000",end="");sys.exit(18)\n'
-            ' output.write_bytes(bytes([payload[0]^1])+payload[1:]);print("200",end="");sys.exit(0)\n'
-            f'os.execv({real_curl!r},["curl",*args])\n')
-        wrapper.chmod(0o755)
-        return wrapper
+        if mode == 'storage':
+            # Fail a real fdatasync in the checkpoint path; production has no test hook.
+            preload=self.root/'fault.so'
+            subprocess.run(['cc','-Wall','-Wextra','-Werror','-shared','-fPIC',
+                str(admin.SOURCE.parent/'tests/fixtures/sync_fault.c'),'-ldl','-o',str(preload)],check=True)
+            marker=self.root/'storage-fail';marker.touch()
+            self.env.update(LD_PRELOAD=str(preload),DM_TEST_SYNC_PATH=str(self.root/'cache'),
+                DM_TEST_SYNC_SUFFIX='kernel.itb.part',DM_TEST_SYNC_MARKER=str(marker),DM_TEST_SYNC_ERRNO='28')
+            return marker
+        return self.proxy.add(self.root/'download-fail',suffix='/releases/1/kernel.itb',
+                              **{mode:True})
 
     def test_interrupted_download_is_retryable_and_never_quarantines_firmware(self):
         wrapper = self.inject_download_failure('partial')
@@ -230,7 +217,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.state()['latest'], 1)
         self.assertEqual(self.state()['audit_events'], [])
         self.assertFalse(self.calls.exists())
-        partial = self.root/'cache/1010001000110000/.download-1/kernel.itb'
+        partial = self.root/'cache/1010001000110000/.download-1/kernel.itb.part'
         self.assertEqual(partial.read_bytes(), self.files['kernel.itb'][:len(self.files['kernel.itb'])//2])
         wrapper.unlink()
         result = self.agent()
@@ -409,10 +396,7 @@ class AutomaticOTA(unittest.TestCase):
         self.assertEqual(self.state()['latest'],0)
 
     def test_report_endpoint_failure_does_not_gate_install_or_reboot(self):
-        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
-        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\na=sys.argv[1:]\n'
-            'if "--data-binary" in a and "/api/devices/" in a[a.index("--url")+1]:sys.exit(7)\n'
-            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        wrapper=self.proxy.add(self.root/'report-fail',suffix='/api/devices/board-01',method='POST',drop=True)
         self.agent();self.assertEqual(self.calls.read_text(),'install\nreboot\n')
         self.assertFalse(self.state()['devices'])
         self.assertIn(' rebooting ',(self.journal_directory()/'transaction').read_text())
@@ -422,19 +406,14 @@ class AutomaticOTA(unittest.TestCase):
                          ['installing','rebooting','success'])
 
     def test_withdrawal_after_download_prevents_flash_transaction(self):
-        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
-        channel=self.feed/'channels/1010001000110000'
-        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\nfrom pathlib import Path\na=sys.argv[1:]\n'
-            'if a[a.index("--url")+1].endswith("/rootfs.itb"):\n'
-            f' Path({str(channel)!r}).unlink(missing_ok=True)\n'
-            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        self.proxy.add(self.root/'withdraw',suffix='/rootfs.itb',withdraw=self.feed/'channels/1010001000110000')
         self.agent(ok=False);self.assertFalse(self.calls.exists())
 
     def test_stopping_during_flash_is_recorded_without_quarantining_firmware(self):
         waiting=self.root/'flash-waiting'
         fw=self.bin/'fwctl';fw.write_text(fw.read_text().replace('update) echo install',
             f'update) touch "{waiting}"; while :; do sleep .1; done; echo install'))
-        process=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.port}',
+        process=subprocess.Popen([str(admin.SOURCE/'fwctld'),'--server',f'http://127.0.0.1:{self.proxy.port}',
             '--cache',str(self.root/'cache'),'--state-dir',str(self.root/'state'),
             '--hwid','1010001000110000','--auto-install','--device','board-01','--once'],
             env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -454,11 +433,8 @@ class AutomaticOTA(unittest.TestCase):
     def test_report_replay_refuses_a_replaced_server_content_identity(self):
         self.agent()
         self.write_snapshot('FWOTA1 1 1 255 65536 1 4 65537 1 4\n')
-        real=shutil.which('curl',path=admin.ENV['PATH']);wrapper=self.bin/'curl'
-        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\na=sys.argv[1:]\n'
-            'if a[a.index("--url")+1].endswith("/releases/1/version"):\n'
-            ' print("BSPOTAVERSION1 1 v1.0.1 "+"c"*64);sys.exit(0)\n'
-            f'os.execv({real!r},["curl",*a])\n');wrapper.chmod(0o755)
+        wrapper=self.proxy.add(self.root/'wrong-identity',suffix='/releases/1/version',
+            response=b'BSPOTAVERSION1 1 v1.0.1 '+b'c'*64+b'\n')
         self.agent();self.assertEqual(self.phase(),'installing')
         self.assertTrue(list(self.journal_directory().glob('*.event')))
         wrapper.unlink();self.agent();self.assertEqual(self.phase(),'success')

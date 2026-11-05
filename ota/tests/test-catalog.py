@@ -72,7 +72,7 @@ class Catalog(admin.AdminHTTP):
         payload.write_bytes(data[:-1]+bytes([data[-1]^1]))
         os.utime(payload,ns=(before.st_atime_ns,before.st_mtime_ns))
         self.assertEqual(self.request('GET','/api/state')[0],500)
-        self.assertIn('sha256sum',self.counter.read_text())
+        self.assertNotIn('sha256sum',self.counter.read_text())
         payload.write_bytes(data)
         self.assertEqual(self.state()['latest'],1)
         self.counter.write_text('');self.state();self.assertEqual(self.counter.read_text(),'')
@@ -146,7 +146,7 @@ class Catalog(admin.AdminHTTP):
             (self.feed/name).unlink(missing_ok=True)
         self.restart();self.counter.write_text('')
         self.assertEqual(self.state()['latest'],1)
-        self.assertIn('sha256sum',self.counter.read_text())
+        self.assertNotIn('sha256sum',self.counter.read_text())
         self.counter.write_text('');self.state();self.assertEqual(self.counter.read_text(),'')
 
 if __name__=='__main__':unittest.main()

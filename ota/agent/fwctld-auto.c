@@ -95,10 +95,11 @@ static int boot_id(char id[64])
 
 static int get(const char *url, char *text, unsigned size)
 {
-    char *args[] = {"curl", "--disable", "--fail", "--silent", "--show-error",
-        "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "5",
-        "--max-time", "15", "--max-filesize", "767", "--url", (char *)url, NULL};
-    return fwctld_request(args, text, size);
+    struct dm_transfer_request request; struct dm_transfer_result response;
+    fwctld_request_init(&request);
+    request.url = url; request.response = text; request.response_capacity = size;
+    request.output_limit = 767; request.connect_timeout_ms = 5000; request.timeout_ms = 15000;
+    return dm_transfer_perform(&request, &response) || (response.http_status < 200 || response.http_status >= 300) ? -1 : 0;
 }
 
 int fwctld_release_identity(const char *server, unsigned long long publication,
@@ -185,11 +186,16 @@ static int post_report(const char *server, const struct ota_report *r)
     char relative[128], url[OTA_PATH], text[OTA_REPORT_SIZE], response[64];
     snprintf(relative, sizeof(relative), "api/devices/%s", r->device);
     if (ota_report_format(text, r) || ota_path(url, server, relative)) return -1;
-    char *args[] = {"curl", "--disable", "--fail", "--silent", "--show-error",
-        "--noproxy", "*", "--proto", "=http,https", "--connect-timeout", "5", "--max-time", "15",
-        "--header", "X-OTA-Request: 1", "--header", "Content-Type: text/plain",
-        "--data-binary", text, "--url", url, NULL};
-    return fwctld_request(args, response, sizeof(response)) || strcmp(response, "ok\n") ? -1 : 0;
+    struct dm_transfer_request request; struct dm_transfer_result result;
+    fwctld_request_init(&request);
+    const char *headers[8]; size_t n = request.header_count;
+    for (size_t i = 0; i < n; i++) headers[i] = request.headers[i];
+    headers[n++] = "X-OTA-Request: 1"; headers[n++] = "Content-Type: text/plain";
+    request.headers = headers; request.header_count = n;
+    request.url = url; request.method = "POST"; request.body = text; request.body_size = strlen(text);
+    request.response = response; request.response_capacity = sizeof(response);
+    request.connect_timeout_ms = 5000; request.timeout_ms = 15000;
+    return dm_transfer_perform(&request, &result) || result.http_status != 200 || strcmp(response, "ok\n") ? -1 : 0;
 }
 
 void fwctld_auto_report_state_problem(const char *server, const char *device,

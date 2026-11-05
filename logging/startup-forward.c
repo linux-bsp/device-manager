@@ -1,6 +1,7 @@
 /* Send finite startup snapshots; RAM ACK follows server archive commit only. */
 #define _GNU_SOURCE
 #include "startup-forward.h"
+#include "dm/transfer.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -60,29 +61,33 @@ static int read_banks(const char *base,struct bank banks[2])
 fail:
     fclose(f);return -1;
 }
+struct startup_push { const char *device;const struct bank *bank;int stage;startup_post_fn post; };
+static int startup_chunk(void *context,uint64_t offset,const void *data,size_t length,uint64_t *next)
+{
+    struct startup_push *s=context;char endpoint[256];long long acknowledged;
+    snprintf(endpoint,sizeof(endpoint),"/api/sol/startup/%s/%s/%s/%llu",s->device,s->bank->id,
+             stages[s->stage],(unsigned long long)offset);
+    int rc=s->post(endpoint,data,length,&acknowledged);
+    if(!rc&&acknowledged<0)return -EPROTO;
+    if(!rc)*next=(uint64_t)acknowledged;
+    return rc;
+}
 static int stream(const char *base,const char *device,const struct bank *b,int stage,startup_post_fn post)
 {
-    char path[1024],endpoint[256],buffer[4096];
+    char path[1024],buffer[4096];
     snprintf(path,sizeof(path),"%s/bank%u-%s",base,b->slot,stages[stage]);
     int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)return -1;
-    uint32_t crc=0;unsigned total=0;long long next;
-    snprintf(endpoint,sizeof(endpoint),"/api/sol/startup/%s/%s/%s/0",device,b->id,stages[stage]);
-    if(post(endpoint,"",0,&next)||next>b->length[stage]){close(fd);return -1;}
-    unsigned resume=(unsigned)next;
-    /* Hash even acknowledged bytes: immutable snapshot identity is checked. */
+    uint32_t crc=0;unsigned total=0;
     for(;;){
-        ssize_t n=read(fd,buffer,sizeof(buffer));if(n<0){if(errno==EINTR)continue;close(fd);return -1;}
-        if(!n)break;
+        ssize_t n=read(fd,buffer,sizeof(buffer));if(n<0&&errno==EINTR)continue;
+        if(n<0){close(fd);return -1;}if(!n)break;
         if((size_t)n>b->length[stage]-total){close(fd);return -1;}
-        crc=checksum(crc,buffer,(size_t)n);
-        unsigned start=resume>total?resume-total:0;
-        if(start<(unsigned)n){
-            snprintf(endpoint,sizeof(endpoint),"/api/sol/startup/%s/%s/%s/%u",device,b->id,stages[stage],total+start);
-            if(post(endpoint,buffer+start,(size_t)n-start,&next)||next!=total+n){close(fd);return -1;}
-        }
-        total+=(unsigned)n;
+        crc=checksum(crc,buffer,(size_t)n);total+=(unsigned)n;
     }
-    close(fd);return total==b->length[stage]&&crc==b->crc[stage]?0:-1;
+    if(total!=b->length[stage]||crc!=b->crc[stage]){close(fd);return -1;}
+    struct startup_push context={device,b,stage,post};
+    struct dm_transfer_push push={.fd=fd,.size=total,.chunk_size=4096,.exchange=startup_chunk,.context=&context};
+    uint64_t next;int rc=dm_transfer_push_file(&push,&next);close(fd);return rc;
 }
 int startup_forward(const char *device,startup_post_fn post)
 {

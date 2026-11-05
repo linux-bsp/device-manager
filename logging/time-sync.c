@@ -3,7 +3,7 @@
 #include "time-sync.h"
 #include "../ota/shared/time-source.h"
 #include <arpa/inet.h>
-#include <curl/curl.h>
+#include "dm/transfer.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
@@ -26,8 +26,7 @@ static int64_t next_attempt,last_sync,anchor_wall,anchor_mono;
 static int warned,last_state;
 static volatile sig_atomic_t cancelled;
 void dm_time_sync_cancel(void){cancelled=1;}
-static int progress(void *p,curl_off_t a,curl_off_t b,curl_off_t c,curl_off_t d)
-{(void)p;(void)a;(void)b;(void)c;(void)d;return cancelled?1:0;}
+static int transfer_cancelled(void *context) { (void)context; return cancelled != 0; }
 static char last_rtc[24]="unavailable";
 struct response {char data[160];size_t length;};
 static unsigned sync_interval=3600;
@@ -37,12 +36,6 @@ static int64_t now_ns(clockid_t clock)
 {
     struct timespec t;if(clock_gettime(clock,&t))return -1;
     return (int64_t)t.tv_sec*NS+t.tv_nsec;
-}
-static size_t receive(char *data,size_t size,size_t count,void *opaque)
-{
-    struct response *r=opaque;size_t n=size*count;
-    if(n>=sizeof(r->data)-r->length)return 0;
-    memcpy(r->data+r->length,data,n);r->length+=n;r->data[r->length]=0;return n;
 }
 static int random_nonce(char nonce[33])
 {
@@ -59,19 +52,16 @@ static int request_http_sample(const char *server,struct dm_time_sample *sample)
 {
     char nonce[33],returned[33],url[1024];int ret=random_nonce(nonce);if(ret)return ret;
     if(snprintf(url,sizeof(url),"%s/api/time/%s",server,nonce)>=(int)sizeof(url))return -ENAMETOOLONG;
-    CURL *curl=curl_easy_init();if(!curl)return -ENOMEM;
     struct response response={0};
-    curl_easy_setopt(curl,CURLOPT_URL,url);curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,receive);
-    curl_easy_setopt(curl,CURLOPT_WRITEDATA,&response);curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT_MS,1000L);
-    curl_easy_setopt(curl,CURLOPT_TIMEOUT_MS,2000L);curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
-    curl_easy_setopt(curl,CURLOPT_NOPROXY,"*");curl_easy_setopt(curl,CURLOPT_PROTOCOLS_STR,"http,https");
-    curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,progress);curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
-    /* No redirects: a different host must not silently become the time source. */
+    struct dm_transfer_request request;struct dm_transfer_result result;
+    dm_transfer_request_init(&request);
+    request.url=url;request.response=response.data;request.response_capacity=sizeof(response.data);
+    request.connect_timeout_ms=1000;request.timeout_ms=2000;request.callbacks.cancelled=transfer_cancelled;
     int64_t start=now_ns(CLOCK_BOOTTIME);
-    CURLcode result=curl_easy_perform(curl);long status=0;curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);
-    int64_t end=now_ns(CLOCK_BOOTTIME);curl_easy_cleanup(curl);
+    int exchange=dm_transfer_perform(&request,&result);
+    int64_t end=now_ns(CLOCK_BOOTTIME);response.length=result.response_size;
     if(cancelled)return -ECANCELED;
-    if(result!=CURLE_OK||status!=200)return -EHOSTUNREACH;
+    if(exchange||result.http_status!=200)return -EHOSTUNREACH;
     if(start<0||end<start||end-start>2*NS)return -ETIMEDOUT;
     long long seconds;long nanoseconds;int consumed=0;
     if(memchr(response.data,0,response.length)||

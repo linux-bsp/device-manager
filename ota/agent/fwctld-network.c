@@ -86,16 +86,17 @@ void fwctld_hardware_context(const char *hwid)
 {
     snprintf(hardware, sizeof(hardware), "X-OTA-HWID: %s", hwid);
 }
-int fwctld_request_status(char *const args[], char *output, unsigned size)
+static int cancelled(void *context)
 {
-    char *request[96]; unsigned n = 0;
-    while (args[n]) { if (n >= 80) return -1; request[n] = args[n]; n++; }
-    for (int i = 0; i < context_count; i++) { request[n++] = "--header"; request[n++] = context[i]; }
-    if (hardware[0]) { request[n++] = "--header"; request[n++] = hardware; }
-    request[n] = NULL;
-    return ota_run_status(request, output, size);
+    (void)context; return ota_stop != 0;
 }
-int fwctld_request(char *const args[], char *output, unsigned size)
+void fwctld_request_init(struct dm_transfer_request *request)
 {
-    return fwctld_request_status(args, output, size) == 0 ? 0 : -1;
+    static const char *headers[6];
+    dm_transfer_request_init(request);
+    size_t n = 0;
+    for (int i = 0; i < context_count; i++) headers[n++] = context[i];
+    if (hardware[0]) headers[n++] = hardware;
+    request->headers = headers; request->header_count = n;
+    request->callbacks.cancelled = cancelled;
 }
