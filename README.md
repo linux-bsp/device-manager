@@ -20,15 +20,13 @@
 - `ota/shared/`：服务端和代理共用的 OTA 协议、校验与报告格式。
 - `ota/web/`：离线管理页面、样式与脚本；构建时嵌入服务端。
 - `ota/tests/`：跨模块的 HTTP、升级和页面回归测试。
-- `firmware/`：独立固件操作引擎，不链接 EDK 库。
-- `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
-- `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
+- `fwctl/`：统一的设备固件模块，包含命令入口、A/B 引擎、存储适配、initramfs 恢复和健康检查；见 [模块说明](fwctl/README.md)。
 - `integration/systemd/`：原生服务、前台启动和本地健康确认；硬件依赖及网络配置由板级 BSP 提供。
 - `logging/`：本地日志组件及集成测试。
 - `time/`：时间服务、CLI、配置持久化及独立测试；日志服务不再负责设时。
 - `transfer/`：OTA、SOL、恢复与校时共用的 C 传输库，提供 HTTP/TFTP、流式上传、持久化续传和服务端文件传输；见 [接口与一致性约束](transfer/README.md)。
 - `config/hwid-registry.json`：产品线、项目和型号名称字典，按上级编码匹配；维护规则见 [HWID 文档](docs/hwid.md#名称字典)。
-- `tests/`：固件事务、恢复和版本显示测试。
+- `tests/`：HWID 与跨模块存储同步测试；固件事务、恢复和健康检查测试位于 `fwctl/tests/`。
 
 ## 构建
 
@@ -87,7 +85,7 @@ SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` �
 
 失败记录可关联已采集的启动日志，在固件详情的“失败与设备异常原因”中查看和下载。Linux/data 异常只上报检测到的原因，不附日志。范围、启动关联与接口见 [失败诊断与日志证据](docs/incident-evidence.md)。
 
-执行 `make -C logging test` 验证日志生命周期；`python3 tests/test_firmware.py` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。
+执行 `make -C logging test` 验证日志生命周期；`make -C fwctl test` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。
 
 侧栏“时间同步”（`/#clock`）显示服务器/设备时间和校时状态，可配置外部 NTP 或 HTTP 时间源、周期，并发起立即校时。设备由独立 `timectld.service` 自动校时并写入 RTC，使用 `timectl status`、`timectl sync` 查询和校准；停止 logctld 不影响校时。启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。
 

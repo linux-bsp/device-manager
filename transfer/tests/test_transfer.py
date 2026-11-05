@@ -25,8 +25,8 @@ class Transfer(unittest.TestCase):
         cls.build = tempfile.TemporaryDirectory(prefix='transfer-build-')
         cls.driver = Path(cls.build.name)/'driver'
         subprocess.run(shlex.split(os.environ.get('CC','cc'))+['-std=c11','-Wall','-Wextra','-Werror',
-            '-I'+str(ROOT/'include'),'-I'+str(ROOT.parent/'firmware/src')]+shlex.split(os.environ.get('CPPFLAGS',''))+
-            [str(ROOT/'tests/driver.c'),str(ROOT.parent/'firmware/src/dm_fw_source.c'),str(ROOT/'build/libdm-transfer.a'),str(ROOT/'build/libdm-transfer-server.a')]+
+            '-I'+str(ROOT/'include'),'-I'+str(ROOT.parent/'fwctl/core')]+shlex.split(os.environ.get('CPPFLAGS',''))+
+            [str(ROOT/'tests/driver.c'),str(ROOT.parent/'fwctl/core/dm_fw_source.c'),str(ROOT/'build/libdm-transfer.a'),str(ROOT/'build/libdm-transfer-server.a')]+
             shlex.split(os.environ.get('LDFLAGS',''))+['-lcurl','-lcrypto','-pthread','-o',str(cls.driver)],check=True)
     @classmethod
     def tearDownClass(cls): cls.build.cleanup()

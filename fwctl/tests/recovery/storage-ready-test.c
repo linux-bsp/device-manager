@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
-#include "../fw-init.c"
+#include "../../recovery/fw-init.c"
 #include <assert.h>
 
 static int ready_mask, fork_calls, child_error;

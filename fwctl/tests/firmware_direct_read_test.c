@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 #include <assert.h>
-#include "../firmware/src/dm_fw_storage_block.c"
+#include "../storage/dm_fw_storage_block.c"
 
 int main(void)
 {

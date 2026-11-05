@@ -1,5 +1,5 @@
 #define main fwctl_entry
-#include "../fwctl/src/fwctl_main.c"
+#include "../cli/fwctl_main.c"
 #undef main
 #include <assert.h>
 

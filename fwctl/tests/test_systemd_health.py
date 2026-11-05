@@ -17,7 +17,7 @@ class SystemdHealth(unittest.TestCase):
         library = cls.path / 'health.so'
         subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                         '-DFWCTL_SYSTEMCTL="'+str(cls.mock)+'"',
-                        str(ROOT/'fwctl/src/fwctl_systemd.c'), '-o', str(library)], check=True)
+                        str(ROOT/'health/fwctl_systemd.c'), '-o', str(library)], check=True)
         cls.library = ctypes.CDLL(str(library))
         cls.query = cls.library.fwctl_systemd_unit_health
         cls.query.argtypes = [ctypes.c_char_p]
