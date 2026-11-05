@@ -31,6 +31,7 @@ test: all
 	python3 ./tests/test-admin.py
 	python3 ./tests/test-admission.py
 	python3 ./tests/test-download-workers.py
+	python3 ./tests/test-upload-workers.py
 	python3 ./tests/test-catalog.py
 	python3 ./tests/test-hwid-catalog.py
 	python3 ./tests/test-hwid-channels.py

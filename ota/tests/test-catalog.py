@@ -77,6 +77,40 @@ class Catalog(admin.AdminHTTP):
         self.assertEqual(self.state()['latest'],1)
         self.counter.write_text('');self.state();self.assertEqual(self.counter.read_text(),'')
 
+    def test_policy_and_downloads_reuse_catalog_with_failure_history(self):
+        self.seed_catalog()
+        quarantine = self.feed / 'quarantine'
+        quarantine.mkdir()
+        (quarantine / ('0' * 64 + '-' + '1' * 64)).write_text('unrelated old incident')
+        for _ in range(2):
+            for path in ('/api/policy/board-a/1', '/releases/1/manifest',
+                         '/releases/1/kernel.itb', '/releases/1/rootfs.itb'):
+                self.assertEqual(self.request('GET', path)[0], 200, path)
+            self.assertEqual(self.counter.read_text(), '')
+            self.restart()
+        with sqlite3.connect(self.feed / 'firmware.db') as db:
+            kernel, rootfs = db.execute('select kernel_sha256,rootfs_sha256 from firmware_identity limit 1').fetchone()
+        marker = quarantine / (kernel + '-' + rootfs)
+        marker.write_text('current incident')
+        self.assertIn(b'blocked', self.request('GET', '/api/policy/board-a/1')[1])
+        self.assertEqual(self.request('GET', '/releases/1/rootfs.itb')[0], 410)
+        self.assertEqual(self.counter.read_text(), '')
+        marker.unlink()
+        self.assertIn(b'allow', self.request('GET', '/api/policy/board-a/1')[1])
+        self.assertEqual(self.counter.read_text(), '')
+
+    def test_policy_detects_changed_payload_despite_preserved_mtime(self):
+        self.seed_catalog()
+        (self.feed / 'quarantine').mkdir()
+        payload = self.feed / 'releases/1/rootfs.itb'
+        before, data = payload.stat(), payload.read_bytes()
+        payload.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+        os.utime(payload, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(self.request('GET', '/api/policy/board-a/1')[0], 503)
+        self.assertEqual(self.request('GET', '/releases/1/rootfs.itb')[0], 503)
+        payload.write_bytes(data)
+        self.assertIn(b'allow', self.request('GET', '/api/policy/board-a/1')[1])
+
     def test_single_active_publication_and_republish(self):
         first=self.seed_catalog()
         second=self.draft(self.bundle(self.fixture(version=65538)))

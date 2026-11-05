@@ -38,6 +38,16 @@ static int transfer_stopped(void *context)
 {
     const struct server_context *server = context; return !*server->running;
 }
+
+static int artifact_policy(const char *root, const char *directory)
+{
+    struct ota_catalog_identity identity;
+    /* The catalog checks inode/size/mtime/ctime before reusing full hashes.
+     * Read requests must not extract and hash every payload just because an
+     * unrelated firmware was quarantined. Publication still verifies bytes. */
+    if (ota_catalog_get(root, directory, &identity)) return -1;
+    return ota_quarantine_hashes_blocked(root, identity.kernel, identity.rootfs);
+}
 static void index_page(int client, bool head)
 {
     if (!http_headers(client, 200, "OK", "text/html; charset=utf-8", sizeof(admin_page) - 1) && !head)
@@ -87,7 +97,7 @@ void server_route_request(int client, const struct server_context *context, stru
         }
         char relative[64], directory[OTA_PATH];
         snprintf(relative, sizeof(relative), "releases/%llu", publication);
-        int blocked = ota_path(directory, context->directory, relative) ? -1 : ota_quarantine_blocked(context->directory, directory);
+        int blocked = ota_path(directory, context->directory, relative) ? -1 : artifact_policy(context->directory, directory);
         if (blocked < 0) { http_text(client, 503, "Unavailable", "Cannot verify failure history\n", head); return; }
         snprintf(body, sizeof(body), "BSPOTAPOLICY1 %llu %s\n", publication, blocked ? "blocked" : "allow");
         http_text(client, 200, "OK", body, head); return;
@@ -356,7 +366,7 @@ void server_route_request(int client, const struct server_context *context, stru
         if (sscanf(path, "/releases/%llu/", &publication) != 1) publication = 0;
         if (publication) {
             snprintf(relative, sizeof(relative), "releases/%llu", publication);
-            int blocked = ota_path(directory, context->directory, relative) ? -1 : ota_quarantine_blocked(context->directory, directory);
+            int blocked = ota_path(directory, context->directory, relative) ? -1 : artifact_policy(context->directory, directory);
             if (blocked) {
                 http_text(client, blocked > 0 ? 410 : 503, blocked > 0 ? "Gone" : "Unavailable", "Firmware quarantined or safety check unavailable\n", head);
                 close(artifact_root); return;

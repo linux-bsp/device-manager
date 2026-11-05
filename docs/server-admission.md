@@ -77,6 +77,23 @@ in the parent and can delay other requests. The two body limits do not reserve
 disk capacity or establish a global storage quota. Existing decompressed-size
 and archive-entry checks remain in force.
 
+## Policy query identity reuse (S5d)
+
+Device policy queries and publication artifact requests resolve their full
+payload hashes through the persistent catalog. Existing failure history no longer
+causes every request to extract FIT payloads and calculate their hashes again.
+Quarantine markers remain live checks; creating a marker blocks the next request
+even when identity data is cached. Missing or inconsistent identity fails closed.
+
+The catalog checks device/inode, size and nanosecond mtime/ctime before reuse.
+A changed or replaced file requires complete verification before its identity
+can be refreshed. These metadata checks are cache invalidation, not continuous
+media-integrity scrubbing or protection from privileged file/database tampering.
+Publication and automatic fallback retain their full byte verification; clients
+continue validating full SHA256 after download and on-device partition writes.
+Tests count FIT tool invocations across repeated requests and server restart,
+and verify live quarantine and corruption detection with preserved mtime.
+
 Next phase: control-request priority,
 global/per-device resource accounting, and explicit transactional ownership across
 publication, quarantine, SOL deletion and archive receipt operations. Long-running
