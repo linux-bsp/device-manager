@@ -41,6 +41,16 @@ claim whether the user requested reboot, halt or poweroff. Restarting logctld in
 one boot preserves the original record rather than creating a new boot.
 
 Evidence failure warns and leaves firmware health/reboot decisions unchanged.
+`logctl boot-event` performs data IO in a worker with a two-second deadline plus
+at most 100 ms of reap attempts. Health and shutdown scripts therefore do not
+wait indefinitely for this optional evidence. A lease on local volatile `/run`
+allows one writer process at a time; a worker stuck in kernel IO retains that
+lease even after its caller returns, so later calls fail instead of piling up
+more workers. Never remove the live lease file. Parent death kills a killable
+worker. Timeout means the write outcome may be unknown, not that no write occurred.
+This boundary does not impose deadlines on the filesystem itself, the collector,
+unrelated shutdown services or the final system sync.
+
 The optional fwctld intent helper has a three-second deadline plus at most 100 ms
 for reap attempts. A process stuck in uninterruptible kernel I/O cannot be forced
 to exit by userspace; at most one unreaped helper is retained. The authoritative

@@ -4,6 +4,7 @@
 #include "retention.h"
 #include "archive.h"
 #include "boot-record.h"
+#include "boot-worker.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -485,7 +486,7 @@ static int show_file(const char *path)
 static int cli_main(int argc,char **argv)
 {
     if(argc==3&&!strcmp(argv[1],"boot-event")){
-        int rc=log_boot_event(root,current,argv[2]);
+        int rc=log_boot_event_bounded(runtime,root,current,argv[2]);
         if(rc)fprintf(stderr,"[logctl] [WARN] boot evidence not recorded: %s\n",strerror(-rc));
         return rc?1:0;
     }

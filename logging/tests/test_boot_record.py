@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Boot evidence tests use disposable roots, never the host's shutdown path."""
 import importlib.util
+import fcntl
 import json
 import os
 from pathlib import Path
 import subprocess
+import time
 import unittest
 
 spec = importlib.util.spec_from_file_location('logging_tests', Path(__file__).with_name('test_logging.py'))
@@ -135,6 +137,65 @@ class BootRecord(unittest.TestCase):
         self.assertNotEqual(self.cli('boot-event', 'ota-update').returncode, 0)
         del self.env['LD_PRELOAD']
         self.assertEqual(self.state(), previous)
+
+    def test_stalled_sync_has_deadline_and_preserves_state(self):
+        self.ready()
+        previous = self.state()
+        source = self.base/'slow-sync.c'
+        source.write_text('#include <unistd.h>\nint fsync(int fd){(void)fd;sleep(30);return 0;}\n')
+        library = self.base/'slow-sync.so'
+        subprocess.run([os.environ.get('CC', 'cc'), '-shared', '-fPIC', str(source), '-o', str(library)], check=True)
+        self.env['LD_PRELOAD'] = str(library)
+        started = time.monotonic()
+        result = self.cli('boot-event', 'operator')
+        elapsed = time.monotonic() - started
+        del self.env['LD_PRELOAD']
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('timed out', result.stderr)
+        self.assertGreaterEqual(elapsed, 1.8)
+        self.assertLess(elapsed, 3)
+        self.assertEqual(self.state(), previous)
+        self.cli('boot-event', 'health-confirmed', check=True)
+        self.assertTrue(self.state()['health_confirmed'])
+
+    def test_held_runtime_lease_rejects_repeated_workers(self):
+        self.ready()
+        with (self.run/'boot-event.lock').open('w') as lease:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            started = time.monotonic()
+            for _ in range(10):
+                self.assertNotEqual(self.cli('boot-event', 'operator').returncode, 0)
+            self.assertLess(time.monotonic() - started, 1)
+        self.cli('boot-event', 'operator', check=True)
+        self.assertEqual(self.state()['intent'], 'operator')
+
+    def test_runtime_lease_rejects_symlink_and_fifo(self):
+        self.ready()
+        path = self.run/'boot-event.lock'
+        victim = self.base/'victim'; victim.write_text('unchanged')
+        path.symlink_to(victim)
+        self.assertNotEqual(self.cli('boot-event', 'operator').returncode, 0)
+        self.assertEqual(victim.read_text(), 'unchanged')
+        path.unlink(); os.mkfifo(path)
+        started = time.monotonic()
+        self.assertNotEqual(self.cli('boot-event', 'operator').returncode, 0)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_caller_death_releases_worker_lease(self):
+        self.ready()
+        source = self.base/'slow-sync.c'
+        source.write_text('#include <unistd.h>\nint fsync(int fd){(void)fd;sleep(30);return 0;}\n')
+        library = self.base/'slow-sync.so'
+        subprocess.run([os.environ.get('CC', 'cc'), '-shared', '-fPIC', str(source), '-o', str(library)], check=True)
+        process = subprocess.Popen([str(base.ROOT/'logctl'), 'boot-event', 'operator'],
+            env=dict(self.env, LD_PRELOAD=str(library)), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.wait(lambda: (self.store/'test-boot-1/boot-state.tmp').exists())
+            process.kill(); process.communicate(timeout=2)
+            self.wait(lambda: self.cli('boot-event', 'health-confirmed').returncode == 0)
+            self.assertTrue(self.state()['health_confirmed'])
+        finally:
+            if process.poll() is None: process.kill(); process.communicate(timeout=2)
 
 
 if __name__ == '__main__':
