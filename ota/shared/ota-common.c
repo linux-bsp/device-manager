@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#ifdef OTA_SERVER_WORKERS
+#include <sys/prctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -77,12 +80,19 @@ int ota_run_status(char *const argv[], char *output, unsigned capacity)
     int pipes[2], status;
     if (pipe(pipes))
         return -1;
+#ifdef OTA_SERVER_WORKERS
+    pid_t parent = getpid();
+#endif
     pid_t pid = fork();
     if (pid == 0) {
+#ifdef OTA_SERVER_WORKERS
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent)
+            _exit(126);
+#endif
         close(pipes[0]);
         if (dup2(pipes[1], STDOUT_FILENO) < 0)
             _exit(126);
-        close(pipes[1]);
+        if (pipes[1] != STDOUT_FILENO) close(pipes[1]);
         execvp(argv[0], argv);
         _exit(127);
     }

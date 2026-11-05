@@ -8,6 +8,15 @@ static char profile_path[256];
 #include "../fwctl/src/fwctl_health.c"
 
 static int link_absent;
+static int metadata_status;
+int fwctl_build_open_params(const struct fwctl_options *options, struct dm_fw_open_params *params)
+{ (void)options; memset(params, 0, sizeof(*params)); return 0; }
+dm_fw_handle_t dm_fw_open_ext(const struct dm_fw_open_params *params)
+{ (void)params; return 1; }
+int32_t dm_fw_close(dm_fw_handle_t handle)
+{ assert(handle == 1); return 0; }
+int32_t dm_fw_get_status(dm_fw_handle_t handle, struct dm_fw_status *status)
+{ assert(handle == 1); (void)status; return metadata_status; }
 int __real_ioctl(int fd, unsigned long request, ...);
 int __wrap_ioctl(int fd, unsigned long request, ...)
 {
@@ -64,6 +73,12 @@ int osa_ipc_receive(int fd, struct osa_ipc_message *message, int timeout_ms)
 
 int main(void)
 {
+    assert(!health_check_fw_status(NULL));
+    metadata_status = -EAGAIN; assert(health_check_fw_status(NULL) == -EBUSY);
+    metadata_status = -EBUSY; assert(health_check_fw_status(NULL) == -EBUSY);
+    metadata_status = -EIO; assert(health_check_fw_status(NULL) == -EIO);
+    metadata_status = -EINVAL; assert(health_check_fw_status(NULL) == -EIO);
+    metadata_status = 0;
     assert(health_check_pid("test", "/nonexistent/fwctl-health-pid") == -EAGAIN);
     assert(!health_check_manager(NULL));
     optional_state = OSA_IPC_HEALTH_EXPIRED;

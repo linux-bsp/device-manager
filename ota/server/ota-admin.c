@@ -247,6 +247,16 @@ done:
 void ota_draft_cleanup(const char *temp)
 {
     char path[OTA_PATH];
+    DIR *dir = opendir(temp);
+    struct dirent *entry;
+    while (dir && (entry = readdir(dir))) {
+        /* Identity extraction is private to this upload. Reap scratch files
+         * left by a terminated verifier; never recursively traverse input. */
+        if (!strncmp(entry->d_name, ".identity-", 10) && strlen(entry->d_name) == 16 &&
+            strspn(entry->d_name + 10, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == 6 &&
+            !ota_path(path, temp, entry->d_name)) unlink(path);
+    }
+    if (dir) closedir(dir);
     const char *names[] = {"package.tar.gz", "release.itb", "kernel.itb", "rootfs.itb", "SHA256SUMS", "manifest", "published"};
     for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!ota_path(path, temp, names[i]))
@@ -280,22 +290,32 @@ int ota_draft_begin(const char *root, char temp[OTA_PATH])
     return fd;
 }
 
-int ota_draft_finish(const char *root, const char *temp, char id[32])
+int ota_draft_prepare(const char *temp, struct ota_prepared_draft *result)
 {
     struct release r;
     unsigned long fit_version;
-    char path[OTA_PATH], drafts[OTA_PATH], target[OTA_PATH];
+    char path[OTA_PATH];
     if (ota_path(path, temp, "package.tar.gz") || unpack(path, temp) || ota_inspect(temp, &r, &fit_version))
         return -1;
-    unlink(path);
+    if (unlink(path)) return -1;
     if (ota_path(path, temp, "manifest") || ota_write(path, &r) || ota_sync_dir(temp))
         return -1;
+    return ota_catalog_prepare(temp, result);
+}
+
+int ota_draft_finish(const char *root, const char *temp, const struct ota_prepared_draft *result, char id[32])
+{
+    char drafts[OTA_PATH], target[OTA_PATH];
     snprintf(id, 32, "draft-%s", temp + strlen(temp) - 6);
     if (ota_path(drafts, root, "drafts") || ota_path(target, drafts, id) || !access(target, F_OK) ||
-        rename(temp, target) || ota_sync_dir(drafts))
+        rename(temp, target))
         return -1;
-    struct ota_catalog_identity identity;
-    return ota_catalog_get(root, target, &identity);
+    if (ota_sync_dir(drafts) || ota_catalog_store(root, target, result)) {
+        ota_draft_cleanup(target);
+        (void)ota_sync_dir(drafts);
+        return -1;
+    }
+    return 0;
 }
 
 

@@ -119,7 +119,10 @@ int main(int argc, char **argv)
         snprintf(recovery_command, sizeof(recovery_command), "recovery-%s", action);
         ret = fwctl_run_firmware(&options, recovery_command, command_argc - 1,
                                  argv + options.command_index + 2);
-        if (ret) fprintf(stderr, "[fwctl] [ERROR] %s failed: %s (%d)\n",
+        if (ret == -ENODATA && !strcmp(action, "info-slot"))
+            fprintf(stderr, "[fwctl] [WARN] deployment %s has no complete rootfs version/hash identity; recovery source unavailable\n",
+                    argv[options.command_index + 2]);
+        else if (ret) fprintf(stderr, "[fwctl] [ERROR] %s failed: %s (%d)\n",
                          recovery_command, strerror(-ret), -ret);
         return ret ? 1 : 0;
     }
@@ -129,7 +132,7 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		ret = fwctl_run_health_checks(&options);
-		return ret == -EAGAIN ? 75 : ret ? 1 : 0;
+		return ret == -EAGAIN ? 75 : ret == -EBUSY ? 76 : ret ? 1 : 0;
 	}
 	ret = fwctl_run_firmware(&options, command, command_argc,
 				 argv + options.command_index + 1);

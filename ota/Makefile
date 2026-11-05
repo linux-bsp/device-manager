@@ -16,7 +16,7 @@ ota-page.h: web/device-names.js web/time-format.js web/index.html web/styles.css
 	python3 web/embed.py $@
 
 device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h $(DM_TRANSFER_SERVER)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) $(SERVER_SOURCES) $(DM_TRANSFER_SERVER) $(LDFLAGS) -lcrypto -lz -lsqlite3 -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DOTA_SERVER_WORKERS $(INCLUDES) $(DM_TRANSFER_INCLUDE) $(SERVER_SOURCES) $(DM_TRANSFER_SERVER) $(LDFLAGS) -lcrypto -lz -lsqlite3 -o $@
 
 fwctld: $(AGENT_SOURCES) $(AGENT_HEADERS) $(DM_TRANSFER_CLIENT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCLUDES) $(DM_TRANSFER_INCLUDE) $(AGENT_SOURCES) $(DM_TRANSFER_CLIENT) $(LDFLAGS) -lcurl -lcrypto -pthread -o $@
@@ -55,6 +55,7 @@ test: all
 	python3 ./tests/test-manager-time.py
 	python3 ./tests/test-clock-control.py
 	python3 ./tests/test-boot-health.py
+	python3 ./tests/test-health-monitor.py
 	python3 ./tests/test-boot-criticality.py
 	python3 ./tests/test-incident-evidence.py
 	python3 ./tests/test-startup-incident.py

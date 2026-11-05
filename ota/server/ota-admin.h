@@ -35,6 +35,14 @@ struct ota_catalog_identity {
     char tag[40], hash[65], kernel[65], rootfs[65];
     char hwids[OTA_HWIDS_SIZE];
 };
+/* Private worker result, never accepted from the network. The parent consumes
+ * it only after successful worker exit and rechecks the file fingerprint. */
+struct ota_prepared_draft {
+    struct ota_catalog_identity identity;
+    char fingerprint[1536];
+};
+int ota_catalog_prepare(const char *directory, struct ota_prepared_draft *result);
+int ota_catalog_store(const char *root, const char *directory, const struct ota_prepared_draft *result);
 struct ota_removal { char path[OTA_PATH], id[32]; long long created; };
 int ota_admin_delete(const char *root, const char *id, const char *peer);
 int ota_admin_cleanup(const char *root);
@@ -58,7 +66,8 @@ int ota_fit_version(const char *directory, unsigned long *version);
 int ota_inspect(const char *directory, struct release *r, unsigned long *version);
 int ota_draft_begin(const char *root, char temp[OTA_PATH]);
 void ota_draft_cleanup(const char *temp);
-int ota_draft_finish(const char *root, const char *temp, char id[32]);
+int ota_draft_prepare(const char *temp, struct ota_prepared_draft *result);
+int ota_draft_finish(const char *root, const char *temp, const struct ota_prepared_draft *result, char id[32]);
 int ota_admin_state(const char *root, char **json);
 int ota_admin_bundle(const char *root, const char *kind, const char *id, char filename[128], unsigned long long *size);
 int ota_admin_publish(const char *root, const char *id, unsigned long long *number);

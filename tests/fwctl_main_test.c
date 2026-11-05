@@ -4,6 +4,7 @@
 #include <assert.h>
 
 static int firmware_calls, recovery_calls;
+static int health_result;
 int fwctl_run_firmware(const struct fwctl_options *o, const char *command, int argc, char **argv)
 {
     assert(o->config && !strcmp(command, "factory-init"));
@@ -15,7 +16,7 @@ int fwctl_recovery_main(int argc, char **argv)
 int fwctl_run_hwid(int argc, char **argv)
 { (void)argc; (void)argv; assert(0); return 0; }
 int fwctl_run_health_checks(const struct fwctl_options *o)
-{ (void)o; assert(0); return 0; }
+{ (void)o; return health_result; }
 
 int main(void)
 {
@@ -35,6 +36,11 @@ int main(void)
     assert(!firmware_calls && recovery_calls == 1);
     assert(!fwctl_entry(4, factory));
     assert(firmware_calls == 1 && recovery_calls == 1);
+    char *health[] = {"fwctl", "health-check"};
+    health_result = -EBUSY; assert(fwctl_entry(2, health) == 76);
+    health_result = -EAGAIN; assert(fwctl_entry(2, health) == 75);
+    health_result = -EIO; assert(fwctl_entry(2, health) == 1);
+    health_result = 0; assert(!fwctl_entry(2, health));
     puts("fwctl dispatch: PID 1 init and explicit factory-force boundary passed");
     return 0;
 }

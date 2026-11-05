@@ -28,7 +28,7 @@ wait_until_stable()
 				count=$((count + 1))
 				[ "$count" -lt "$checks" ] || return 0
 				;;
-			75)
+			75|76)
 				count=0
 				if [ "$waiting" -eq 0 ]; then
 					cat /run/fw-confirm-health.last >&2

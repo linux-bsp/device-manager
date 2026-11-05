@@ -23,7 +23,7 @@ case "$last" in
 health-check)
     count=$(cat "$CALLS.count" 2>/dev/null || echo 0)
     count=$((count + 1)); echo "$count" > "$CALLS.count"
-    [ "$count" -gt "${HEALTH_PENDING:-0}" ] || exit 75
+    [ "$count" -gt "${HEALTH_PENDING:-0}" ] || exit "${PENDING_EXIT:-75}"
     exit "${HEALTH_EXIT:-0}" ;;
 status)
     echo "active: 0  pending: ${PENDING:-none}  last-good: 0  selected: 1"
@@ -63,6 +63,11 @@ esac
         p=self.run_worker(HEALTH_PENDING='99',PENDING='1');self.assertNotEqual(p.returncode,0)
         calls=self.calls.read_text();self.assertEqual(calls.count('health-check'),24)
         self.assertIn('mark-bad',calls);self.assertIn('reboot',calls);self.assertFalse(self.marker.exists())
+    def test_metadata_lock_does_not_confirm_or_reset_stability_requirement(self):
+        p=self.run_worker(HEALTH_PENDING='4',PENDING_EXIT='76')
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertEqual(self.calls.read_text().count('health-check'),10)
+        self.assertEqual(self.marker.read_text(),'1\n')
     def test_definite_failure_does_not_wait_for_deadline(self):
         p=self.run_worker(HEALTH_EXIT='1',PENDING='1');self.assertNotEqual(p.returncode,0)
         calls=self.calls.read_text();self.assertEqual(calls.count('health-check'),1)

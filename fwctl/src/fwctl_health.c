@@ -272,6 +272,10 @@ static int health_check_fw_status(const struct fwctl_options *options)
 				     strerror(-handle));
 	ret = dm_fw_get_status(handle, &status);
 	dm_fw_close(handle);
+	if (ret == -EAGAIN || ret == -EBUSY) {
+        fprintf(stderr, "[fwctl] [WARN] health-check: firmware transaction busy; metadata check deferred\n");
+        return -EBUSY;
+    }
 	if (ret)
 		return health_report("firmware status failed: %s", strerror(-ret));
 	return 0;
@@ -291,14 +295,17 @@ static const struct health_check health_checks[] = {
 int fwctl_run_health_checks(const struct fwctl_options *options)
 {
 	size_t i;
-	int pending = 0;
+	int pending = 0, busy = 0;
 
 	for (i = 0; i < sizeof(health_checks) / sizeof(health_checks[0]); i++) {
 		int ret = health_checks[i].run(options);
 		if (ret == -EAGAIN)
 			pending = 1;
+		else if (ret == -EBUSY)
+			busy = 1;
 		else if (ret)
 			return ret;
 	}
-	return pending ? -EAGAIN : 0;
+	/* A metadata lock must never hide a pending or failed local service. */
+	return pending ? -EAGAIN : busy ? -EBUSY : 0;
 }

@@ -72,6 +72,75 @@ static int hash_string(const char *s)
     return s && strlen(s) == 64 && strspn(s, "0123456789abcdef") == 64;
 }
 
+/* No SQLite calls here: this runs in the upload worker after inherited database
+ * descriptors have been closed. Cover the full validation with a fingerprint. */
+int ota_catalog_prepare(const char *directory, struct ota_prepared_draft *result)
+{
+    char after[1536], body[512], extra, manifest[OTA_PATH];
+    unsigned long long publication, sizes[2]; unsigned version;
+    struct stat st;
+    memset(result, 0, sizeof(*result));
+    struct ota_catalog_identity *id = &result->identity;
+    if (fingerprint(directory, result->fingerprint) ||
+        ota_image_identity(directory, 1, body, sizeof(body)) ||
+        ota_content_identity(body, id->hash, &id->version) ||
+        sscanf(body, "BSPOTAIMAGE1 %llu %u %llu %64s %llu %64s %c", &publication,
+            &version, &sizes[0], id->kernel, &sizes[1], id->rootfs, &extra) != 6 ||
+        ota_fit_hwids(directory, id->hwids) || fingerprint(directory, after) ||
+        strcmp(result->fingerprint, after) || ota_path(manifest, directory, "manifest") ||
+        stat(manifest, &st)) return -1;
+    id->kernel_bytes = sizes[0]; id->rootfs_bytes = sizes[1];
+    id->uploaded_at = (long long)st.st_mtime;
+    snprintf(id->tag, sizeof(id->tag), "v%lu.%lu.%lu", id->version >> 16,
+        (id->version >> 8) & 255, id->version & 255);
+    return 0;
+}
+
+int ota_catalog_store(const char *root, const char *directory, const struct ota_prepared_draft *result)
+{
+    const struct ota_catalog_identity *id = &result->identity;
+    char current[1536], expected[40];
+    snprintf(expected, sizeof(expected), "v%lu.%lu.%lu", id->version >> 16,
+        (id->version >> 8) & 255, id->version & 255);
+    if (!memchr(result->fingerprint, 0, sizeof(result->fingerprint)) ||
+        !memchr(id->hwids, 0, sizeof(id->hwids)) || !memchr(id->tag, 0, sizeof(id->tag)) ||
+        id->hash[64] || id->kernel[64] || id->rootfs[64] ||
+        !id->version || id->version > UINT32_MAX || strcmp(expected, id->tag) ||
+        !hash_string(id->hash) || !hash_string(id->kernel) || !hash_string(id->rootfs) ||
+        !ota_hwid_list_valid(id->hwids) || !id->kernel_bytes || id->kernel_bytes > OTA_MAX_FILE ||
+        !id->rootfs_bytes || id->rootfs_bytes > OTA_MAX_FILE ||
+        fingerprint(directory, current) || strcmp(current, result->fingerprint) ||
+        database(root) || ota_catalog_removed(root, directory, NULL)) return -1;
+    if (sqlite3_exec(catalog, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK) return -1;
+    sqlite3_stmt *q = NULL; int rc = -1;
+    const char *sql = "INSERT INTO firmware_identity "
+        "(path,fingerprint,version,tag,firmware_id,kernel_sha256,rootfs_sha256,uploaded_at,kernel_bytes,rootfs_bytes,verified_at) "
+        "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,unixepoch())";
+    if (sqlite3_prepare_v2(catalog, sql, -1, &q, NULL) != SQLITE_OK) goto done;
+    sqlite3_bind_text(q, 1, directory, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 2, current, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(q, 3, id->version);
+    sqlite3_bind_text(q, 4, id->tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 5, id->hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 6, id->kernel, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 7, id->rootfs, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(q, 8, id->uploaded_at);
+    sqlite3_bind_int64(q, 9, (sqlite3_int64)id->kernel_bytes);
+    sqlite3_bind_int64(q, 10, (sqlite3_int64)id->rootfs_bytes);
+    if (sqlite3_step(q) != SQLITE_DONE) goto done;
+    sqlite3_finalize(q); q = NULL;
+    sql = "INSERT INTO firmware_hardware(path,fingerprint,hwids) VALUES(?1,?2,?3)";
+    if (sqlite3_prepare_v2(catalog, sql, -1, &q, NULL) != SQLITE_OK) goto done;
+    sqlite3_bind_text(q, 1, directory, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 2, current, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 3, id->hwids, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_DONE && sqlite3_exec(catalog, "COMMIT", NULL, NULL, NULL) == SQLITE_OK) rc = 0;
+done:
+    sqlite3_finalize(q);
+    if (rc) sqlite3_exec(catalog, "ROLLBACK", NULL, NULL, NULL);
+    return rc;
+}
+
 /* Backfill old catalogs once without rehashing payloads. Warm UI reads use SQL. */
 static int hardware(const char *directory, const char *before, char hwids[OTA_HWIDS_SIZE])
 {

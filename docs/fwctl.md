@@ -40,6 +40,12 @@ The transport syntax reflects available services: U-Boot supports TFTP and
 memory FITs; Linux supports files and URLs. Recovery runs before the affected
 next stage: kernel recovery in U-Boot, rootfs recovery in initramfs.
 
+`health-check` exits with 0 for healthy, 75 for local readiness pending, 76 for
+firmware metadata locked by an active transaction, and 1 for a definite failure.
+Lock contention never overrides another failing or pending local check. The
+systemd monitor permits at most 180 seconds of continuous metadata contention
+after readiness; boot confirmation still requires six fully healthy checks.
+
 `health-check` runs the registered boot, marker, service, PDM/CAN device, and
 firmware metadata checks. It also queries `system_manager` over the OSA local
 IPC socket for required service readiness and heartbeat state. It exits zero

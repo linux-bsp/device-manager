@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -17,6 +18,7 @@
 struct upload {
     pid_t pid;
     int client;
+    struct ota_prepared_draft *prepared;
     char root[OTA_PATH], temp[OTA_PATH];
 };
 static struct upload workers[UPLOAD_WORKERS];
@@ -30,18 +32,22 @@ void server_uploads_poll(void)
         int status;
         pid_t result = waitpid(job->pid, &status, WNOHANG);
         if (result == 0 || (result < 0 && errno == EINTR)) continue;
-        int received = result == job->pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        int code = result == job->pid && WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+        /* All FIT helpers belong to the upload process group. A timeout or
+         * signal must not leave a helper writing an abandoned staging file. */
+        (void)kill(-job->pid, SIGKILL);
         char id[32], body[128];
-        if (!stopping && received && !ota_draft_finish(job->root, job->temp, id)) {
+        if (!stopping && !code && !ota_draft_finish(job->root, job->temp, job->prepared, id)) {
             snprintf(body, sizeof(body), "{\"id\":\"%s\",\"status\":\"draft\"}\n", id);
             http_json(job->client, 201, "Created", body, false);
         } else {
             ota_draft_cleanup(job->temp);
-            if (!stopping) http_json(job->client, received ? 422 : 400,
-                received ? "Unprocessable Content" : "Bad Request",
-                received ? "{\"error\":\"固件包校验失败；检查 FIT、HWID 和组件 SHA256。\"}" :
-                "{\"error\":\"上传未完成或超过接收时限，请重试。\"}", false);
+            if (!stopping) http_json(job->client, code == 1 ? 400 : 422,
+                code == 1 ? "Bad Request" : "Unprocessable Content",
+                code == 1 ? "{\"error\":\"上传或校验未完成，可能超过处理时限，请重试。\"}" :
+                "{\"error\":\"固件包校验失败；检查 FIT、HWID 和组件 SHA256。\"}", false);
         }
+        munmap(job->prepared, sizeof(*job->prepared));
         close(job->client); job->pid = 0;
     }
 }
@@ -67,17 +73,33 @@ void server_upload(int client, unsigned long long length, const struct server_co
         close(file); ota_draft_cleanup(job.temp);
         http_json(client, 503, "Unavailable", "{\"error\":\"Upload connection unavailable\"}", false); return;
     }
+    job.prepared = mmap(NULL, sizeof(*job.prepared), PROT_READ | PROT_WRITE,
+                        MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (job.prepared == MAP_FAILED) {
+        close(job.client); close(file); ota_draft_cleanup(job.temp);
+        http_json(client, 503, "Unavailable", "{\"error\":\"Upload result memory unavailable\"}", false); return;
+    }
     pid_t parent = getpid(), child = fork();
     if (child < 0) {
+        munmap(job.prepared, sizeof(*job.prepared));
         close(job.client); close(file); ota_draft_cleanup(job.temp);
         http_json(client, 503, "Unavailable", "{\"error\":\"Upload worker unavailable\"}", false); return;
     }
     if (!child) {
-        if (server_worker_enter(parent, client, file, 180)) _exit(125);
+        if (setpgid(0, 0) || server_worker_enter(parent, client, file, 180)) _exit(125);
         int rc = dm_transfer_receive_file(client, file, length, OTA_UPLOAD_MAX, 180000, NULL);
         if (close(file)) rc = -EIO;
-        _exit(rc ? 1 : 0);
+        if (rc) _exit(1);
+        close(client);
+        /* FIT helper stdout uses pipes. Keep standard descriptors reserved,
+         * and never let a helper inherit the upload response socket. */
+        int null = open("/dev/null", O_RDWR);
+        if (null < 0) _exit(2);
+        for (int fd = 0; fd < 3; fd++) if (dup2(null, fd) < 0) _exit(2);
+        if (null > 2) close(null);
+        _exit(ota_draft_prepare(job.temp, job.prepared) ? 2 : 0);
     }
+    (void)setpgid(child, child);
     close(file); job.pid = child; workers[slot] = job;
     *context->response_deferred = 1;
 }
@@ -85,7 +107,10 @@ void server_upload(int client, unsigned long long length, const struct server_co
 void server_uploads_stop(void)
 {
     stopping = 1;
-    for (int i = 0; i < UPLOAD_WORKERS; i++) if (workers[i].pid) (void)kill(workers[i].pid, SIGTERM);
+    for (int i = 0; i < UPLOAD_WORKERS; i++) if (workers[i].pid) {
+        (void)kill(-workers[i].pid, SIGTERM);
+        (void)kill(workers[i].pid, SIGTERM);
+    }
     for (int attempt = 0; attempt < 20; attempt++) {
         server_uploads_poll();
         int active = 0;
@@ -94,6 +119,7 @@ void server_uploads_stop(void)
         struct timespec pause = {.tv_nsec=10000000}; nanosleep(&pause, NULL);
     }
     for (int i = 0; i < UPLOAD_WORKERS; i++) if (workers[i].pid) {
+        (void)kill(-workers[i].pid, SIGKILL);
         (void)kill(workers[i].pid, SIGKILL);
         close(workers[i].client);
         /* If kernel IO is stuck, preserve the partial directory for inspection.

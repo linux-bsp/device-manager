@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "ota-admin.h"
+#include "dm/transfer.h"
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +12,13 @@
 int ota_image_identity(const char *directory, unsigned long long publication,
                        char *body, size_t capacity)
 {
-    char path[OTA_PATH], manifest[OTA_PATH], temp[] = "/tmp/ota-identity-XXXXXX";
+    char path[OTA_PATH], manifest[OTA_PATH], temp[OTA_PATH];
     char conf[128], node[256], image[128], names[2048], index[32];
     char hashes[2][65]; unsigned long long sizes[2]; unsigned long version;
     struct release release;
     if (ota_path(manifest, directory, "manifest") || ota_read(manifest, &release) ||
         ota_verify(directory, &release) || ota_fit_version(directory, &version)) return -1;
+    if (ota_path(temp, directory, ".identity-XXXXXX")) return -1;
     int fd = mkstemp(temp), rc = -1;
     if (fd < 0) return -1;
     FILE *out = fdopen(fd, "wb"), *in = NULL;
@@ -73,13 +75,13 @@ int ota_content_identity(const char *body, char hash[65], unsigned long *version
     int count = snprintf(canonical, sizeof(canonical), "BSPFWCONTENT1\nkernel %llu %s\nrootfs %llu %s\n",
         sizes[0], kernel, sizes[1], rootfs);
     if (count < 0 || count >= (int)sizeof(canonical)) return -1;
-    char temporary[] = "/tmp/ota-content-XXXXXX";
-    int fd = mkstemp(temporary); if (fd < 0) return -1;
-    int rc = write(fd, canonical, (size_t)count) == count ? 0 : -1;
-    if (close(fd)) rc = -1;
-    unsigned long long bytes;
-    if (!rc) rc = ota_hash(temporary, hash, &bytes);
-    unlink(temporary); if (!rc) *version = value; return rc;
+    FILE *temporary = tmpfile();
+    if (!temporary) return -1;
+    int rc = fwrite(canonical, 1, (size_t)count, temporary) != (size_t)count || fflush(temporary) ? -1 : 0;
+    if (!rc) rc = dm_transfer_sha256_fd(fileno(temporary), (uint64_t)count, hash, NULL);
+    if (fclose(temporary)) rc = -1;
+    if (!rc) *version = value;
+    return rc;
 }
 
 int ota_firmware_identity(const char *directory, char hash[65], unsigned long *version)

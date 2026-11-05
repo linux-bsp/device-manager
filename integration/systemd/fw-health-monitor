@@ -14,16 +14,30 @@ for argument in $(cat /proc/cmdline); do
 done
 ready=0
 pending=0
+busy_since=
 while :; do
     timeout -s KILL 4 /usr/sbin/fwctl health-check > /run/fwctl-health.last 2>&1
     result=$?
     case "$result" in
         0)
             pending=0
+            busy_since=
             if [ "$ready" -eq 0 ]; then
                 systemd-notify --ready || exit 1
                 ready=1
             fi
+            ;;
+        76)
+            # A writer owns firmware metadata. Keep checking all other local
+            # health conditions, but bound continuous lock contention to 180s.
+            read -r uptime rest < /proc/uptime || exit 1
+            now=${uptime%.*}
+            [ -n "$busy_since" ] || busy_since=$now
+            if [ "$((now - busy_since))" -ge 180 ]; then
+                echo '[fwctl] [ERROR] firmware transaction remained busy for 180 seconds' >&2
+                exit 1
+            fi
+            pending=0
             ;;
         75)
             pending=$((pending + 1))
