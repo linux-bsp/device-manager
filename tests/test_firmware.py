@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory(prefix='dm-fw-test-') as tmp:
         binary=Path(tmp)/name
         args=shlex.split(os.environ.get('CC','cc'))+['-std=gnu11','-Wall','-Wextra','-Werror','-I'+str(src),'-I'+str(root/'firmware/include'),'-I'+str(root/'fwctl/include')]+shlex.split(os.environ.get('CPPFLAGS',''))+[str(root/'tests'/f'{name}.c')]+[str(src/f) for f in files]
         if name=='fwctl_version_test':args+=[str(root/'fwctl/src/fwctl_firmware.c'),'-Wl,--wrap=fopen']
-        if name=='fwctl_health_test':args+=['-I'+str(root/'fwctl/adapter'),'-ffunction-sections','-fdata-sections','-Wl,--gc-sections']
+        if name=='fwctl_health_test':args+=['-I'+str(root/'fwctl/adapter'),'-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Wl,--wrap=ioctl']
         args+=shlex.split(os.environ.get('LDFLAGS',''))+['-lcrypto','-pthread','-o',str(binary)]
         subprocess.run(args,check=True);subprocess.run([str(binary)],check=True)
         print('PASS',name)

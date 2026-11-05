@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,8 +130,8 @@ static int health_check_manager(const struct fwctl_options *options)
         if (status.state > OSA_IPC_HEALTH_FAILED)
             return health_report("invalid service health state: %s", "protocol error");
         if (status.service_id == OSA_IPC_SERVICE_PSATELLITED) {
-            if (critical_seen++ || !(status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED))
-                return health_report("critical service health is inconsistent: %s", "psatellited");
+            if (critical_seen++)
+                return health_report("duplicate service in health snapshot: %s", "psatellited");
         }
 		if ((status.flags & OSA_IPC_HEALTH_FLAG_REQUIRED) &&
 		    (status.state == OSA_IPC_HEALTH_PENDING ||
@@ -141,7 +144,7 @@ static int health_check_manager(const struct fwctl_options *options)
 			return health_report("service is unhealthy: %s",
 					     service_name(status.service_id));
 	}
-	return critical_seen ? 0 : health_report("critical service missing from health snapshot: %s", "psatellited");
+	return critical_seen ? 0 : health_report("service missing from health snapshot: %s", "psatellited");
 }
 
 static int health_check_executables(const struct fwctl_options *options)
@@ -158,42 +161,70 @@ static int health_check_executables(const struct fwctl_options *options)
 	return 0;
 }
 
-static int health_check_sysfs(const struct fwctl_options *options)
-{
-	static const char *const paths[] = {
-		"/sys/module/pdm", "/sys/class/net/can0", "/sys/class/net/can1",
-	};
-	struct stat st;
-	size_t i;
+#ifndef FWCTL_HEALTH_PROFILE
+#define FWCTL_HEALTH_PROFILE "/etc/device-manager/health.conf"
+#endif
 
-	(void)options;
-	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-		int ret = stat(paths[i], &st);
-		if (ret < 0 && errno == ENOENT)
-			return health_pending("%s is not ready", paths[i]);
-		else if (ret < 0 || !S_ISDIR(st.st_mode))
-			return health_report("%s is not available", paths[i]);
-	}
-	return 0;
+/* Check local network setup, never peer reachability or link carrier. A switch
+ * outage must not cause an autonomous reset loop on a healthy local device. */
+static int health_check_netdev(const char *name)
+{
+    struct ifreq request = {0};
+    if (!*name || strlen(name) >= sizeof(request.ifr_name) || strchr(name, '/'))
+        return health_report("invalid required network interface: %s", name);
+    strcpy(request.ifr_name, name);
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0)
+        return health_report("cannot inspect network interface: %s", name);
+    int ret = ioctl(fd, SIOCGIFFLAGS, &request);
+    close(fd);
+    if (ret || !(request.ifr_flags & IFF_UP))
+        return health_pending("local network interface is not configured UP: %s", name);
+    return 0;
+}
+
+static int health_check_profile(const struct fwctl_options *options)
+{
+    (void)options;
+    FILE *file = fopen(FWCTL_HEALTH_PROFILE, "r");
+    char line[512];
+    unsigned entries = 0;
+    int result = 0;
+    if (!file)
+        return health_report("local health profile is unavailable: %s", FWCTL_HEALTH_PROFILE);
+    while (fgets(line, sizeof(line), file)) {
+        char *value;
+        line[strcspn(line, "\r\n")] = 0;
+        if (!*line || *line == '#') continue;
+        value = strchr(line, '=');
+        if (!value || !value[1] || ++entries > 32) {
+            result = health_report("invalid local health profile: %s", FWCTL_HEALTH_PROFILE);
+            break;
+        }
+        *value++ = 0;
+        if (!strcmp(line, "required-netdev"))
+            result = health_check_netdev(value);
+        else if (!strcmp(line, "required-path")) {
+            struct stat st;
+            if (*value != '/') result = -EINVAL;
+            else if (stat(value, &st)) result = health_pending("required local device path not ready: %s", value);
+        } else {
+            result = health_report("unknown health requirement: %s", line);
+        }
+        if (result) break;
+    }
+    if (!result && (ferror(file) || !entries)) result = -EINVAL;
+    fclose(file);
+    return result;
 }
 
 static int health_check_devices(const struct fwctl_options *options)
 {
-	static const char *const paths[] = {
-		"/dev/watchdog0", "/dev/pdm_manager",
-	};
-	struct stat st;
-	size_t i;
-
-	(void)options;
-	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-		int ret = stat(paths[i], &st);
-		if (ret < 0 && errno == ENOENT)
-			return health_pending("%s is not ready", paths[i]);
-		else if (ret < 0 || !S_ISCHR(st.st_mode))
-			return health_report("%s is not a character device", paths[i]);
-	}
-	return 0;
+    struct stat st;
+    (void)options;
+    if (stat("/dev/watchdog0", &st) || !S_ISCHR(st.st_mode))
+        return health_pending("watchdog device is not ready: %s", "/dev/watchdog0");
+    return 0;
 }
 
 static int health_check_fw_status(const struct fwctl_options *options)
@@ -224,7 +255,7 @@ static const struct health_check health_checks[] = {
 	{ "pidfiles", health_check_pids },
 	{ "system-manager", health_check_manager },
 	{ "executables", health_check_executables },
-	{ "sysfs", health_check_sysfs },
+	{ "board-profile", health_check_profile },
 	{ "char-devices", health_check_devices },
 	{ "fwctl", health_check_fw_status },
 };
