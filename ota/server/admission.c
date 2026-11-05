@@ -2,6 +2,7 @@
 #include "admission.h"
 #include "http.h"
 #include "downloads.h"
+#include "uploads.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -70,6 +71,7 @@ int server_accept_loop(int listener, const struct server_context *context)
     for (int i = 0; i < CLIENTS; i++) clients[i].fd = -1;
     int result = 0, cursor = 0;
     while (*context->running) {
+        server_uploads_poll();
         server_downloads_poll();
         int64_t now = now_ms();
         if (now < 0) { result = -EIO; break; }
@@ -115,6 +117,7 @@ int server_accept_loop(int listener, const struct server_context *context)
                 struct http_request request;
                 rc = http_parse_request(p->fd, &request, p->header, p->used);
                 if (!rc) {
+                    server_uploads_poll();
                     server_downloads_poll();
                     struct server_context owned = *context;
                     owned.response_deferred = &deferred;
@@ -136,5 +139,6 @@ int server_accept_loop(int listener, const struct server_context *context)
     }
     for (int i = 0; i < CLIENTS; i++) if (clients[i].fd >= 0) close(clients[i].fd);
     server_downloads_stop();
+    server_uploads_stop();
     free(clients); return result;
 }

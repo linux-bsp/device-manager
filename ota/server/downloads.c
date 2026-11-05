@@ -2,13 +2,12 @@
 #include "downloads.h"
 #include "ota-admin.h"
 #include "http.h"
-#include <dirent.h>
+#include "worker.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -52,20 +51,6 @@ void server_downloads_poll(void)
     }
 }
 
-static int close_other_descriptors(int socket, int file)
-{
-    DIR *directory = opendir("/proc/self/fd");
-    if (!directory) return -1;
-    int scan = dirfd(directory);
-    struct dirent *entry;
-    while ((entry = readdir(directory))) {
-        char *end; long fd = strtol(entry->d_name, &end, 10);
-        if (*entry->d_name && !*end && fd >= 0 && fd != socket && fd != file && fd != scan)
-            close((int)fd);
-    }
-    closedir(directory); return 0;
-}
-
 void server_download(const struct dm_transfer_serve *serve, const char *root,
                       unsigned long long publication, const char *device, int count_download,
                       int *response_deferred)
@@ -106,10 +91,7 @@ void server_download(const struct dm_transfer_serve *serve, const char *root,
         http_text(serve->socket, 503, "Unavailable", "Download worker unavailable\n", false); return;
     }
     if (!child) {
-        signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL); signal(SIGALRM, SIG_DFL);
-        if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent) _exit(125);
-        alarm(180);
-        if (close_other_descriptors(serve->socket, serve->fd)) _exit(125);
+        if (server_worker_enter(parent, serve->socket, serve->fd, 180)) _exit(125);
         struct dm_transfer_serve transport = *serve;
         memset(&transport.callbacks, 0, sizeof(transport.callbacks));
         _exit(dm_transfer_serve_file(&transport) ? 1 : 0);

@@ -3,6 +3,7 @@
 #include "router.h"
 #include "http.h"
 #include "downloads.h"
+#include "uploads.h"
 #include "ota-admin.h"
 #include "sol-route.h"
 #include "sol.h"
@@ -43,32 +44,6 @@ static void index_page(int client, bool head)
         (void)http_send_all(client, admin_page, sizeof(admin_page) - 1);
 }
 
-static void upload(int client, unsigned long long length, const struct server_context *context)
-{
-    char temp[OTA_PATH], id[32];
-    int fd = ota_draft_begin(context->directory, temp);
-    if (fd < 0) {
-        http_json(client, 503, "Service Unavailable", "{\"error\":\"无法创建上传目录，请检查空间或清理旧草稿（最多 256 个）。\"}", false);
-        return;
-    }
-    struct dm_transfer_callbacks callbacks = {.cancelled=transfer_stopped,.context=(void *)context};
-    int failed = dm_transfer_receive_file(client, fd, length, OTA_UPLOAD_MAX, 180000, &callbacks);
-    if (close(fd)) failed = 1;
-    if (failed) {
-        ota_draft_cleanup(temp);
-        http_json(client, 400, "Bad Request", "{\"error\":\"上传未完成，请重试。\"}", false);
-        return;
-    }
-    if (ota_draft_finish(context->directory, temp, id)) {
-        ota_draft_cleanup(temp);
-        http_json(client, 422, "Unprocessable Content",
-            "{\"error\":\"固件包校验失败。请上传包含 release.itb、kernel.itb、rootfs.itb 的 tar.gz；检查 FIT 版本、HWID 声明及组件 SHA256 是否匹配。\"}", false);
-        return;
-    }
-    char json[128];
-    snprintf(json, sizeof(json), "{\"id\":\"%s\",\"status\":\"draft\"}\n", id);
-    http_json(client, 201, "Created", json, false);
-}
 
 void server_route_request(int client, const struct server_context *context, struct http_request *request)
 {
@@ -183,7 +158,7 @@ void server_route_request(int client, const struct server_context *context, stru
             }
             if (expect && http_send_all(client, "HTTP/1.1 100 Continue\r\n\r\n", 25))
                 return;
-            upload(client, length, context);
+            server_upload(client, length, context);
         } else {
             if (length) {
                 http_json(client, 400, "Bad Request", "{\"error\":\"Publish request must have an empty body\"}", false);

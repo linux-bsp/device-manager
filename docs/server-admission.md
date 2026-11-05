@@ -15,8 +15,8 @@ SIGTERM closes pending clients without waiting for their header deadlines.
 Completed inline responses half-close their write side and drain at most 64 KiB
 for at most one second, using the same nonblocking loop. This lets a small error
 response reach a client that has already started sending a rejected body, instead
-of immediately resetting the socket. Deferred downloads transfer socket ownership
-to the worker and are not half-closed by the parent.
+of immediately resetting the socket. Deferred transfers retain socket ownership
+outside the admission pool and are not half-closed by that pool.
 
 Route handlers and database changes remain serialized. This
 avoids introducing concurrent catalog/publication/quarantine mutations before
@@ -53,7 +53,31 @@ checks run after handlers and during normal loop iterations; a blocked handler
 can still delay detection. Manual forensic package exports remain available under
 their existing policy, independently of automatic OTA distribution.
 
-Next phase: bounded body staging, control-request priority,
+## Upload reception workers (S5c)
+
+Firmware archive reception uses at most two worker processes per server instance.
+Each retains only its client socket and controlled temporary file, with a
+180-second absolute lifetime and the existing 512 MiB compressed body limit.
+Progress does not reset the lifetime. A full pool returns 503; the client may
+retry later. This endpoint still requires a complete upload, not upload resumption.
+
+The parent retains the response connection and exclusive ownership of archive
+validation, draft registration and database changes. Only a successful receive
+worker can enter validation; incomplete, disconnected or timed-out bodies are
+removed without creating a draft. Fully received invalid archives return 422.
+Only validated drafts return 201, and publication remains a separate operation.
+Graceful shutdown terminates receivers and removes their partial files; parent
+death kills killable children. Uninterruptible kernel IO and abrupt server death
+can leave `.upload-*` directories requiring inspection and cleanup. The worker
+limit is per running instance, not across orphaned kernel tasks after restarts.
+
+This isolates slow network reception, not storage or validation work. Temporary
+file creation/cleanup, decompression, FIT inspection and catalog updates remain
+in the parent and can delay other requests. The two body limits do not reserve
+disk capacity or establish a global storage quota. Existing decompressed-size
+and archive-entry checks remain in force.
+
+Next phase: control-request priority,
 global/per-device resource accounting, and explicit transactional ownership across
 publication, quarantine, SOL deletion and archive receipt operations. Long-running
 database/storage failures also require a defined deadline and cancellation policy.
@@ -63,4 +87,7 @@ binary-body boundaries, malformed input, fixed deadlines, limits, disconnect chu
 and service stop. `test-download-workers.py` covers slow readers, worker limits,
 exact bytes/Range, accounting, quarantine cancellation, descriptor isolation and
 shutdown; the lifetime test accelerates the worker alarm in an isolated fixture.
+`test-upload-workers.py` covers slow receivers, capacity rejection, exact valid
+archive completion, malformed/truncated bodies, descriptor ownership, shutdown
+and an accelerated lifetime deadline.
 Existing transfer/OTA/SOL tests cover parser and mutation behavior.
