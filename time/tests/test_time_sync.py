@@ -70,6 +70,8 @@ class ClockSync(unittest.TestCase):
         self.nonces=[];self.mode='valid';self.worker=None;owner=self
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                if not self.path.startswith('/api/time/'):
+                    self.send_response(200);self.end_headers();self.wfile.write(b'DMCLOCK1 0 1 3600 -\n');return
                 nonce=self.path.rsplit('/',1)[-1];owner.nonces.append(nonce)
                 sec,nsec=divmod(time.time_ns(),10**9)
                 if owner.mode=='nonce':nonce='0'*32
@@ -85,20 +87,29 @@ class ClockSync(unittest.TestCase):
             def log_message(self,*args):pass
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler);self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.url=f'http://127.0.0.1:{self.server.server_port}'
-        conf=self.base/'sol.conf';conf.write_text(f'server={self.url}\nauth=none\ndevice=device-a\ninterface=lo\n')
+        conf=self.base/'time.conf';conf.write_text(f'server={self.url}\nauth=none\ndevice=device-a\ninterface=lo\nenabled=0\n')
         self.capture=self.base/'calls';rtc=self.base/'rtc';rtc.touch()
-        self.env=dict(os.environ,TZ='CST-8',LD_PRELOAD=str(self.preload),DM_CLOCK_TEST_CAPTURE=str(self.capture),DM_CLOCK_TEST_RTC=str(rtc),LOGCTL_RUN_DIR=str(self.base/'run'),LOGCTL_SOL_CONFIG=str(conf))
+        self.env=dict(os.environ,TZ='CST-8',LD_PRELOAD=str(self.preload),DM_CLOCK_TEST_CAPTURE=str(self.capture),DM_CLOCK_TEST_RTC=str(rtc),TIMECTL_RUN_DIR=str(self.base/'run'),TIMECTL_CONFIG=str(conf))
     def tearDown(self):
         if self.worker:self.worker.terminate();self.worker.communicate(timeout=8)
         self.server.shutdown();self.server.server_close();self.thread.join();self.tmp.cleanup()
+    def start_worker(self,**values):
+        self.worker=subprocess.Popen([str(ROOT/'timectld')],env=dict(self.env,**values),stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        for _ in range(200):
+            if (self.base/'run/control.sock').exists():return
+            if self.worker.poll() is not None:self.fail(self.worker.communicate()[1].decode())
+            time.sleep(.01)
+        self.fail('time service did not start')
     def sync(self,**values):
-        return subprocess.run([str(ROOT/'logctl'),'sync-time'],env=dict(self.env,**values),capture_output=True,text=True,timeout=12)
+        if self.worker:self.worker.terminate();self.worker.communicate(timeout=8);self.worker=None
+        self.start_worker(**values)
+        return subprocess.run([str(ROOT/'timectl'),'sync'],env=self.env,capture_output=True,text=True,timeout=16)
     def status(self):return dict(line.split('=',1) for line in (self.base/'run/clock-status').read_text().splitlines())
     def test_initial_clock_calibrates_and_writes_utc_rtc(self):
         result=self.sync();self.assertEqual(result.returncode,0,result.stderr)
         calls=self.capture.read_text();seconds=int(re.search(r'set (\d+) ',calls)[1]);self.assertLess(abs(seconds-time.time()),2)
         self.assertIn(time.strftime('rtc %Y-%m-%dT%H:%M:',time.gmtime(seconds)),calls)
-        self.assertIn('+0800',result.stderr)
+        self.assertIn('+0800',self.status()['clock-synced-local'])
         self.assertEqual(self.status()['clock-timezone'],'+0800')
         self.assertTrue(self.status()['clock-synced-local'].endswith('+0800'))
         status=self.status();self.assertEqual(status['clock-state'],'synchronized');self.assertEqual(status['rtc-state'],'written')
@@ -118,9 +129,8 @@ class ClockSync(unittest.TestCase):
         result=self.sync(DM_CLOCK_TEST_NOW='real');self.assertEqual(result.returncode,0,result.stderr)
         self.assertNotIn('set ',self.capture.read_text());self.assertIn('rtc ',self.capture.read_text())
     def test_auto_worker_cancels_before_setting_time_during_shutdown(self):
-        self.mode='stall';conf=self.base/'sol.conf';conf.write_text(conf.read_text()+'time-sync=1\n')
-        store=self.base/'boots';boot=store/'boot-a';boot.mkdir(parents=True);(boot/'order').write_text('1\n')
-        self.worker=subprocess.Popen([str(ROOT/'logctl'),'forward','--root',str(store)],env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        self.mode='stall';conf=self.base/'time.conf';conf.write_text(conf.read_text().replace('enabled=0','enabled=1'))
+        self.start_worker()
         for _ in range(50):
             if self.nonces:break
             time.sleep(.02)

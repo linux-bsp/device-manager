@@ -7,3 +7,5 @@
 /logging/logctl
 /logging/logctld
 __pycache__/
+/time/timectl
+/time/timectld

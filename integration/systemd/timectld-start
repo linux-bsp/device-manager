@@ -1,0 +1,8 @@
+#!/bin/sh
+# Storage is prepared by the board; time synchronization never mounts/formats it.
+storage_state=$(cat /run/device-manager/storage-state 2>/dev/null)
+if [ "$storage_state" = persistent ] && mountpoint -q /data && [ -w /data ]; then
+    mkdir -p /data/timectl ||
+        echo '[timectld] [WARN] time source configuration cannot be persisted' >&2
+fi
+exec /usr/sbin/timectld

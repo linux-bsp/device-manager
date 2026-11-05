@@ -10,6 +10,7 @@
 | `fwctld` | 设备 | OTA 检查、下载、调用 fwctl、上报结果 |
 | `logctl` | 设备 | 查询、实时查看及导出本地日志 |
 | `logctld` | 设备 | 内核与服务日志采集、启动日志归档、轮转 |
+| `timectl` / `timectld` | 设备 | 独立 NTP/HTTP 校时、RTC、时间源配置及状态上报 |
 
 ## 目录
 
@@ -24,6 +25,7 @@
 - `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
 - `integration/systemd/`：原生服务、前台启动和本地健康确认；硬件依赖及网络配置由板级 BSP 提供。
 - `logging/`：本地日志组件及集成测试。
+- `time/`：时间服务、CLI、配置持久化及独立测试；日志服务不再负责设时。
 - `transfer/`：OTA、SOL、恢复与校时共用的 C 传输库，提供 HTTP/TFTP、流式上传、持久化续传和服务端文件传输；见 [接口与一致性约束](transfer/README.md)。
 - `config/hwid-registry.json`：产品线、项目和型号名称字典，按上级编码匹配；维护规则见 [HWID 文档](docs/hwid.md#名称字典)。
 - `tests/`：固件事务、恢复和版本显示测试。
@@ -87,7 +89,7 @@ SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` �
 
 执行 `make -C logging test` 验证日志生命周期；`python3 tests/test_firmware.py` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。
 
-侧栏“时间同步”（`/#clock`）显示服务器/设备时间和校时状态，可配置外部 NTP 或 HTTP 时间源、周期，并发起立即校时。设备支持自动校时并写入 RTC；启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。
+侧栏“时间同步”（`/#clock`）显示服务器/设备时间和校时状态，可配置外部 NTP 或 HTTP 时间源、周期，并发起立即校时。设备由独立 `timectld.service` 自动校时并写入 RTC，使用 `timectl status`、`timectl sync` 查询和校准；停止 logctld 不影响校时。启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。
 
 ## 固件删除
 

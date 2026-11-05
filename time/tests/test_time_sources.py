@@ -18,6 +18,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class TimeSources(unittest.TestCase):
     setUpClass=classmethod(base.ClockSync.setUpClass.__func__)
     tearDownClass=classmethod(base.ClockSync.tearDownClass.__func__)
+    start_worker=base.ClockSync.start_worker
     sync=base.ClockSync.sync
     status=base.ClockSync.status
     def setUp(self):
@@ -44,8 +45,8 @@ class TimeSources(unittest.TestCase):
         self.ntp_thread=threading.Thread(target=serve,daemon=True);self.ntp_thread.start()
         self.source=f'ntp://127.0.0.1:{self.udp.getsockname()[1]}'
         self.disk=tempfile.TemporaryDirectory(prefix='.clock-config-test-',dir=ROOT)
-        self.config=Path(self.disk.name)/'time-source.conf';self.env['LOGCTL_TIME_CONFIG']=str(self.config)
-        self.config.write_text(f'DMCLOCKLOCAL1 1 1 3600 {self.source} 0\n')
+        self.config=Path(self.disk.name)/'time-source.conf';self.env['TIMECTL_STATE_FILE']=str(self.config)
+        self.config.write_text(f'DMCLOCKLOCAL1 1 0 3600 {self.source} 0\n')
     def tearDown(self):
         self.ntp_stop.set();self.ntp_thread.join(timeout=2);self.udp.close();base.ClockSync.tearDown(self);self.disk.cleanup()
     def test_ntp_corrects_initial_clock_and_era_after_2036(self):
@@ -60,24 +61,23 @@ class TimeSources(unittest.TestCase):
                 self.assertFalse(self.capture.exists());self.assertEqual(self.status()['clock-state'],'unsynchronized')
     def test_stopping_worker_cancels_waiting_ntp_without_setting_clock(self):
         self.ntp_mode='silent'
-        conf=self.base/'sol.conf';conf.write_text(conf.read_text()+'time-sync=1\n')
-        store=self.base/'boots';boot=store/'boot-a';boot.mkdir(parents=True);(boot/'order').write_text('1\n')
-        self.worker=subprocess.Popen([str(ROOT/'logctl'),'forward','--root',str(store)],env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        self.config.write_text(f'DMCLOCKLOCAL1 1 1 3600 {self.source} 0\n')
+        self.start_worker()
         end=time.monotonic()+4
         while not self.packets and time.monotonic()<end:time.sleep(.02)
         self.assertGreater(self.packets,0);start=time.monotonic()
         self.worker.terminate();self.worker.communicate(timeout=3);self.worker=None
         self.assertLess(time.monotonic()-start,2.5);self.assertFalse(self.capture.exists())
     def test_http_alternative_source_is_independent_of_management_address(self):
-        self.config.write_text(f'DMCLOCKLOCAL1 1 1 60 {self.url} 0\n')
-        conf=self.base/'sol.conf';conf.write_text('server=http://127.0.0.1:1\nauth=none\ndevice=device-a\ninterface=lo\n')
+        self.config.write_text(f'DMCLOCKLOCAL1 1 0 60 {self.url} 0\n')
+        conf=self.base/'time.conf';conf.write_text('server=http://127.0.0.1:1\nauth=none\ndevice=device-a\ninterface=lo\n')
         self.assertEqual(self.sync().returncode,0);self.assertEqual(self.status()['clock-server'],self.url)
     def test_remote_apply_report_and_persistence_across_worker_restart(self):
         (self.base/'feed').mkdir()
         manager=subprocess.Popen([str(ROOT.parent/'ota/device-server'),'--root',str(self.base/'feed'),'--port','0','--sol-debug-no-auth'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             url=manager.stdout.readline().split()[2].rstrip('/');http=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            conf=self.base/'sol.conf';conf.write_text(f'server={url}\nauth=none\ndevice=device-a\ninterface=lo\ntime-sync=1\n')
+            conf=self.base/'time.conf';conf.write_text(f'server={url}\nauth=none\ndevice=device-a\ninterface=lo\nenabled=1\n')
             self.config.unlink()
             def submit(source,enabled=1):
                 r=urllib.request.Request(url+'/api/clock/config/device-a',data=f'DMCLOCK1 {enabled} 60 {source}\n'.encode(),headers={'X-OTA-Request':'1'})
@@ -85,8 +85,7 @@ class TimeSources(unittest.TestCase):
             def state():
                 with http.open(url+'/api/clock') as f:return json.load(f)['devices'][0]
             def start():
-                store=self.base/'boots';boot=store/'boot-a';boot.mkdir(parents=True,exist_ok=True);(boot/'order').write_text('1\n')
-                self.worker=subprocess.Popen([str(ROOT/'logctl'),'forward','--root',str(store)],env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+                self.start_worker()
             def until(predicate):
                 end=time.monotonic()+15
                 while time.monotonic()<end:

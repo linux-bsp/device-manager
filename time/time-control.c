@@ -19,20 +19,15 @@ static int loaded,last_error;
 static volatile sig_atomic_t cancelled;
 void dm_clock_cancel(void){cancelled=1;}
 static const char *config_path(void)
-{const char *p=getenv("LOGCTL_TIME_CONFIG");return p?p:"/data/log/time-source.conf";}
-static int load(struct settings *s)
+{const char *p=getenv("TIMECTL_STATE_FILE");return p?p:"/data/timectl/source.conf";}
+static int load_path(const char *path, struct settings *s)
 {
-    FILE *f=fopen(config_path(),"r");if(!f)return -errno;
+    FILE *f=fopen(path,"r");if(!f)return -errno;
     char body[700];size_t n=fread(body,1,sizeof(body)-1,f);int bad=ferror(f)||!feof(f);fclose(f);body[n]=0;
     int used=0;
     if(bad||sscanf(body,"DMCLOCKLOCAL1 %lld %d %u %511s %d%n",&s->revision,&s->enabled,&s->interval,s->source,&s->outcome,&used)!=5||
-       strcmp(body+used,"\n")||s->revision<1||s->enabled<0||s->enabled>1||s->interval<60||s->interval>86400||!dm_source_valid(s->source)||s->outcome < -1||s->outcome>4095)return -EINVAL;
+       strcmp(body+used,"\n")||s->revision<0||s->enabled<0||s->enabled>1||s->interval<60||s->interval>86400||!dm_source_valid(s->source)||s->outcome < -1||s->outcome>4095)return -EINVAL;
     return 0;
-}
-int dm_clock_local(char source[512],int *enabled,unsigned *interval)
-{
-    struct settings s;int result=load(&s);if(result)return result;
-    strcpy(source,s.source);*enabled=s.enabled;*interval=s.interval;return 0;
 }
 static int save(const struct settings *s)
 {
@@ -53,6 +48,63 @@ static int save(const struct settings *s)
     if(error)unlink(temp);
     return -error;
 }
+int dm_clock_init(int enabled, unsigned interval, const char *source)
+{
+    current.enabled=enabled;current.interval=interval;
+    snprintf(current.source,sizeof(current.source),"%s",source);
+    struct settings saved;
+    int rc=load_path(config_path(),&saved);
+    /* One-time import of on-device settings. Leave the old record untouched
+     * for a firmware rollback; never replace a present new-format location. */
+    if(rc==-ENOENT){
+        const char *old=getenv("TIMECTL_IMPORT_FILE");
+        if(!old&&!getenv("TIMECTL_STATE_FILE"))old="/data/log/time-source.conf";
+        if(old&&*old){
+            int imported=load_path(old,&saved);
+            if(!imported){
+                rc=save(&saved);
+                if(rc)fprintf(stderr,"[timectld] [WARN] time configuration import not persisted: %s\n",strerror(-rc));
+                else fprintf(stderr,"[timectld] [INFO] imported existing time source configuration\n");
+                /* Even when data is read-only, honor the valid saved source. */
+                current=saved;
+            }else if(imported!=-ENOENT)rc=imported;
+        }
+    }
+    if(!rc)current=saved;
+    if(current.outcome>=0){attempted=current.revision;last_error=current.outcome;}
+    dm_time_interval(current.interval);loaded=1;
+    return rc==-ENOENT?0:rc;
+}
+int dm_clock_sync_now(const char *server,const char *interface)
+{
+    return dm_time_sync(strcmp(current.source,"-")?current.source:server,interface,1);
+}
+int dm_clock_set_source(const char *source)
+{
+    if(!dm_source_valid(source))return -EINVAL;
+    struct settings desired=current;
+    snprintf(desired.source,sizeof(desired.source),"%s",source);
+    int rc=save(&desired);
+    if(!rc)current=desired;
+    return rc;
+}
+int dm_clock_status(const char *server,char *body,unsigned capacity)
+{
+    const char *source=strcmp(current.source,"-")?current.source:server;
+    int n=snprintf(body,capacity,"daemon-state=running\nclock-enabled=%d\nclock-interval=%u\nclock-effective-source=%s\n",
+                   current.enabled,current.interval,source);
+    if(n<0||(unsigned)n>=capacity)return -ENOSPC;
+    char path[1024];const char *run=getenv("TIMECTL_RUN_DIR");if(!run)run="/run/timectl";
+    if(snprintf(path,sizeof(path),"%s/clock-status",run)>=(int)sizeof(path))return -ENAMETOOLONG;
+    FILE *f=fopen(path,"r");
+    if(!f){
+        int k=snprintf(body+n,capacity-(unsigned)n,"clock-state=unsynchronized\n");
+        return k<0||(unsigned)k>=capacity-(unsigned)n?-ENOSPC:0;
+    }
+    size_t got=fread(body+n,1,capacity-(unsigned)n-1,f);
+    int rc=ferror(f)||!feof(f)?-EOVERFLOW:0;
+    fclose(f);body[n+got]=0;return rc;
+}
 struct response {char body[2048];size_t length;};
 static int transfer_cancelled(void *context) { (void)context; return cancelled != 0; }
 static int exchange(const char *server,const char *device,const char *key,const char *body,struct response *r)
@@ -72,7 +124,7 @@ static int exchange(const char *server,const char *device,const char *key,const 
 }
 static void report(const char *server,const char *device,const char *key,const char *source)
 {
-    char boot[64]="unknown",body[1900],path[1024],status[1400]="";const char *run=getenv("LOGCTL_RUN_DIR");if(!run)run="/run/logctl";
+    char boot[64]="unknown",body[1900],path[1024],status[1400]="";const char *run=getenv("TIMECTL_RUN_DIR");if(!run)run="/run/timectl";
     FILE *f=fopen("/proc/sys/kernel/random/boot_id","r");if(f){if(!fgets(boot,sizeof(boot),f))strcpy(boot,"unknown");fclose(f);boot[strcspn(boot,"\r\n")]=0;}
     snprintf(path,sizeof(path),"%s/clock-status",run);f=fopen(path,"r");
     if(f){size_t n=fread(status,1,sizeof(status)-1,f);status[n]=0;fclose(f);}
@@ -84,10 +136,7 @@ static void report(const char *server,const char *device,const char *key,const c
 void dm_clock_cycle(const char *server,const char *interface,const char *device,const char *key)
 {
     if(cancelled)return;
-    if(!loaded){
-        struct settings saved;if(!load(&saved)){current=saved;if(saved.outcome>=0){attempted=saved.revision;last_error=saved.outcome;}}
-        loaded=1;
-    }
+    if(!loaded)return;
     struct response r={0};int remote=exchange(server,device,key,NULL,&r);
     if(!remote){
         struct settings desired={.outcome=-1};int used=0;
@@ -105,7 +154,7 @@ void dm_clock_cycle(const char *server,const char *interface,const char *device,
                 int saved=save(&current);if(saved)error=saved;
             }
             last_error=error<0?-error:0;
-            fprintf(stderr,"[logctld] [%s] clock configuration %s: source=%s interval=%u seconds%s\n",last_error?"WARN":"INFO",last_error?strerror(last_error):"applied",desired.source,desired.interval,desired.enabled?"":" (automatic synchronization disabled)");
+            fprintf(stderr,"[timectld] [%s] clock configuration %s: source=%s interval=%u seconds%s\n",last_error?"WARN":"INFO",last_error?strerror(last_error):"applied",desired.source,desired.interval,desired.enabled?"":" (automatic synchronization disabled)");
         }
     }
     if(cancelled)return;

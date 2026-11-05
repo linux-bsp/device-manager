@@ -9,6 +9,7 @@
 | 设备 | `fwctld` | 等待网络，轮询发布，校验下载，调用 `fwctl`，上报升级结果 |
 | 设备及 initramfs | `fwctl` | 验证固件、操作 A/B 分区、恢复、健康确认；不依赖服务端在线 |
 | 设备 | `logctld` / `logctl` | 本地日志采集、归档与查询；SOL 仅传送只读日志 |
+| 设备 | `timectld` / `timectl` | 独立时间源管理、NTP/HTTP 校准、RTC 和状态回报；不依赖 SOL 生命周期 |
 
 ## 主机代码分层
 
@@ -17,7 +18,7 @@
 ```mermaid
 flowchart LR
   Browser[Web / ota-cli] --> HTTP[http.c]
-  Device[fwctld / logctld] --> HTTP
+  Device[fwctld / logctld / timectld] --> HTTP
   HTTP --> Router[router.c]
   Router --> OTA[OTA 服务模块]
   Router --> SOL[sol-route.c → sol.c]
@@ -54,3 +55,9 @@ SHA256、文件收发，不决定保留策略。实时日志、早期双缓冲�
 
 `logging/boot-record.c` 记录启动事件、CRC/序列和软件重启意图，不决定硬件复位原因或
 固件状态迁移。fwctld 的可选日志调用有独立截止时间，证据不可用不覆盖已提交的升级事务。
+
+`time/` 独立构建 `timectl`，`timectld` 是同一可执行文件的入口链接。守护进程拥有配置、
+周期取时与唯一设时入口；CLI 通过有长度限制、15 秒总等待期限的本地 Unix packet socket
+发起请求，不直接设时。运行目录 0700，验证对端 UID，并以文件锁拒绝第二个守护进程。
+systemd 单独管理时间服务，与 logctld/fwctld 无 Requires/BindsTo 依赖；本地日志、健康检查
+和 OTA 不等待校时成功。NTP 仍使用原来的单播 SNTP 算法，本次不引入 chronyd。

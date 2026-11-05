@@ -1,0 +1,22 @@
+[Unit]
+Description=Device time synchronization and RTC management
+Wants=bsp-data.service
+After=bsp-data.service
+Conflicts=systemd-timesyncd.service chronyd.service ntpd.service ntp.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+ExecStart=/usr/libexec/device-manager/timectld-start
+RuntimeDirectory=timectl
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=12
+NoNewPrivileges=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

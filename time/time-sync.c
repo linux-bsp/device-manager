@@ -82,7 +82,7 @@ static int network_ready(const char *interface)
 }
 static int state_path(char *path,size_t size,const char *name)
 {
-    const char *root=getenv("LOGCTL_RUN_DIR");if(!root)root="/run/logctl";
+    const char *root=getenv("TIMECTL_RUN_DIR");if(!root)root="/run/timectl";
     return snprintf(path,size,"%s/%s",root,name)>=(int)size?-1:0;
 }
 static void status_file(const char *state,const char *server,long long offset,long long uncertainty)
@@ -149,12 +149,12 @@ int dm_time_sync(const char *server,const char *interface,int force)
             next_attempt=anchor_mono+(int64_t)sync_interval*NS;last_state=2;warned=0;
             char when[48];time_t seconds=(time_t)last_sync;struct tm local;
             localtime_r(&seconds,&local);strftime(when,sizeof(when),"%Y-%m-%dT%H:%M:%S%z",&local);
-            fprintf(stderr,"[logctld] [INFO] time synchronized: %s source=%s rtc=%s\n",when,server,last_rtc);
+            fprintf(stderr,"[timectld] [INFO] time synchronized: %s source=%s rtc=%s\n",when,server,last_rtc);
             close(lock);return 0;
         }
     }
     status_file(last_sync?"holdover":"unsynchronized",server,0,0);last_state=3;
     next_attempt=now_ns(CLOCK_BOOTTIME)+30*NS;
-    if(!warned++)fprintf(stderr,"[logctld] [WARN] time sync failed: %s; retrying in 30 seconds\n",strerror(-error));
+    if(!warned++)fprintf(stderr,"[timectld] [WARN] time sync failed: %s; retrying in 30 seconds\n",strerror(-error));
     close(lock);return error;
 }

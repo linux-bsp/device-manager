@@ -490,7 +490,6 @@ static int cli_main(int argc,char **argv)
         if(rc)fprintf(stderr,"[logctl] [WARN] boot evidence not recorded: %s\n",strerror(-rc));
         return rc?1:0;
     }
-    if(argc==2&&!strcmp(argv[1],"sync-time"))return sol_sync_time();
     if(argc==4&&!strcmp(argv[1],"forward")&&!strcmp(argv[2],"--root")&&argv[3][0]=='/')return sol_forward(argv[3]);
     if(argc>=4&&!strcmp(argv[1],"run"))return run_command(argv[2],argv+3);
     if(argc==4&&!strcmp(argv[1],"write")){if(stage_id(argv[2])<0)return 2;emit(argv[2],argv[3],strlen(argv[3]));return 0;}
@@ -504,7 +503,6 @@ static int cli_main(int argc,char **argv)
         printf("archive-ack=%zu\narchive-pending=%zu\n",acknowledged,closed-acknowledged);
         char status[PATH_CAP];join(status,runtime,"sync-status");
         if(access(status,F_OK))puts("sync-state=unknown");else if(show_file(status))return 1;
-        join(status,runtime,"clock-status");if(!access(status,R_OK)&&show_file(status))return 1;
         const char *handoff=getenv("LOGCTL_HANDOFF_DIR");if(!handoff)handoff="/sys/firmware/bootlog";
         join(status,handoff,"state");if(!access(status,R_OK)&&(show_file(status)))return 1;
         return 0;
@@ -561,7 +559,7 @@ static int cli_main(int argc,char **argv)
 usage:
     fprintf(stderr,"Usage: logctl boot-state | boot-events [--boot ID|previous]\n"
         "       logctl boot-event {health-confirmed|ota-update|health-rejected|operator|shutdown|cancel-intent}\n"
-        "       logctl sync-time | verify-storage | verify-boot\n"
+        "       logctl verify-storage | verify-boot\n"
         "       logctl status | boots | losses | show [--boot ID|previous] [--stage STAGE]\n"
         "       logctl follow [--boot ID|previous] [--stage STAGE]\n"
         "       logctl export [--boot ID|previous] --output /path/logs.tar.gz\n"

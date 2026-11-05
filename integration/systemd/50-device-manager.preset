@@ -1,5 +1,6 @@
 enable fwctld.service
 enable logctld.service
+enable timectld.service
 enable logctl-journal.service
 enable fw-health.service
 enable fw-confirm.service
