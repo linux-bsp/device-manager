@@ -7,6 +7,7 @@ struct server_context {
     const char *directory;
     int root;
     const volatile sig_atomic_t *running;
+    int *response_deferred;
 };
 
 struct http_request;

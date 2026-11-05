@@ -101,7 +101,13 @@ class Catalog(admin.AdminHTTP):
         self.assertEqual(self.request('HEAD','/releases/1/rootfs.itb')[0],200)
         for headers in ({'X-OTA-Device':'board-01'},{'X-OTA-Device':'board-01'},{}):
             self.assertEqual(self.request('GET','/releases/1/rootfs.itb',headers=headers)[0],200)
-        self.assertEqual(self.state()['download_stats'],[{'publication':1,'downloads':3,'identified_downloads':2,'unique_devices':1}])
+        expected=[{'publication':1,'downloads':3,'identified_downloads':2,'unique_devices':1}]
+        # Read-only transport completion is reaped by the parent event loop.
+        for _ in range(100):
+            counts=self.state()['download_stats']
+            if counts==expected:break
+            time.sleep(.02)
+        self.assertEqual(counts,expected)
         self.restart()
         self.assertEqual(self.state()['download_stats'][0]['downloads'],3)
 

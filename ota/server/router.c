@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "router.h"
 #include "http.h"
+#include "downloads.h"
 #include "ota-admin.h"
 #include "sol-route.h"
 #include "sol.h"
@@ -229,7 +230,7 @@ void server_route_request(int client, const struct server_context *context, stru
         struct dm_transfer_serve serve = {.socket=client,.fd=bundle,.head=head,.size=bytes,
             .range=requested_range,.content_type="application/gzip",.filename=filename,
             .callbacks={.cancelled=transfer_stopped,.context=(void *)context}};
-        (void)dm_transfer_serve_file(&serve);
+        server_download(&serve, NULL, 0, NULL, 0, context->response_deferred);
         close(bundle); return;
     }
     if (!strcmp(path, "/") || !strcmp(path, "/firmware")) {
@@ -397,12 +398,9 @@ void server_route_request(int client, const struct server_context *context, stru
     }
     struct dm_transfer_serve serve = {.socket=client,.fd=fd,.head=head,.size=(uint64_t)st.st_size,
         .range=requested_range,.callbacks={.cancelled=transfer_stopped,.context=(void *)context}};
-    int sent = dm_transfer_serve_file(&serve);
-    if (!sent && !head && !strcmp(name, "rootfs.itb")) {
-        unsigned long long publication;
-        if (sscanf(path, "/releases/%llu/", &publication) == 1 &&
-            ota_catalog_download(context->directory, publication, download_device))
-            fprintf(stderr, "[device-server] [ERROR] Cannot record completed download for #%llu\n", publication);
-    }
+    unsigned long long publication = 0;
+    if (sscanf(path, "/releases/%llu/", &publication) != 1) publication = 0;
+    server_download(&serve, context->directory, publication, download_device,
+                    publication && !strcmp(name, "rootfs.itb"), context->response_deferred);
     close(fd);
 }

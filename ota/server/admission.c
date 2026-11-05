@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "admission.h"
 #include "http.h"
+#include "downloads.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -16,7 +17,7 @@
 #define PEER_CLIENTS 16
 #define HEADER_MS 15000
 struct pending {
-    int fd;
+    int fd, draining;
     uint32_t peer;
     int64_t started;
     size_t used;
@@ -69,45 +70,71 @@ int server_accept_loop(int listener, const struct server_context *context)
     for (int i = 0; i < CLIENTS; i++) clients[i].fd = -1;
     int result = 0, cursor = 0;
     while (*context->running) {
+        server_downloads_poll();
         int64_t now = now_ms();
         if (now < 0) { result = -EIO; break; }
         struct pollfd events[CLIENTS + 1] = {{.fd=listener, .events=POLLIN}};
         int timeout = 1000;
         for (int i = 0; i < CLIENTS; i++) {
             struct pending *p = &clients[i];
-            if (p->fd >= 0 && now - p->started >= HEADER_MS) {
-                reject(p->fd, 408); close(p->fd); p->fd = -1;
+            int limit = p->draining ? 1000 : HEADER_MS;
+            if (p->fd >= 0 && now - p->started >= limit) {
+                if (!p->draining) reject(p->fd, 408);
+                close(p->fd); p->fd = -1;
             }
             events[i+1] = (struct pollfd){.fd=p->fd, .events=POLLIN};
-            if (p->fd >= 0 && HEADER_MS - (now - p->started) < timeout)
-                timeout = (int)(HEADER_MS - (now - p->started));
+            if (p->fd >= 0 && limit - (now - p->started) < timeout)
+                timeout = (int)(limit - (now - p->started));
         }
         int ready = poll(events, CLIENTS + 1, timeout);
         if (ready < 0 && errno == EINTR) continue;
         if (ready < 0) { result = -errno; break; }
         if (!*context->running) break;
         if (events[0].revents & (POLLERR | POLLHUP | POLLNVAL)) { result = -EIO; break; }
-        if (events[0].revents & POLLIN) accept_some(listener, clients);
         /* Rotate service order. One bounded header step per connection per
          * turn; there are no threads and no concurrent database mutations. */
         for (int count = 0; count < CLIENTS && *context->running; count++) {
             int i = (cursor + count) % CLIENTS;
             struct pending *p = &clients[i];
             if (p->fd < 0 || events[i+1].fd != p->fd || !events[i+1].revents) continue;
+            if (p->draining) {
+                char discard[2048];
+                ssize_t got = recv(p->fd, discard, sizeof(discard), MSG_DONTWAIT);
+                if (got > 0) p->used += (size_t)got;
+                if ((!got || (got < 0 && errno != EAGAIN && errno != EINTR)) || p->used >= 65536) {
+                    close(p->fd); p->fd = -1;
+                }
+                continue;
+            }
             now = now_ms();
             int rc = now < 0 || now - p->started >= HEADER_MS ? 408 :
                 dm_transfer_http_header_step(p->fd, p->header, sizeof(p->header), &p->used);
             if (!rc) continue;
+            int deferred = 0;
             if (rc == 1) {
                 struct http_request request;
                 rc = http_parse_request(p->fd, &request, p->header, p->used);
-                if (!rc) server_route_request(p->fd, context, &request);
+                if (!rc) {
+                    server_downloads_poll();
+                    struct server_context owned = *context;
+                    owned.response_deferred = &deferred;
+                    server_route_request(p->fd, &owned, &request);
+                    server_downloads_poll();
+                }
             }
             if (rc > 0) reject(p->fd, rc);
-            close(p->fd); p->fd = -1;
+            if (deferred || rc < 0) { close(p->fd); p->fd = -1; }
+            else {
+                /* Deliver a final response before discarding a rejected body's
+                 * remaining bytes; never block other clients on lingering IO. */
+                (void)shutdown(p->fd, SHUT_WR);
+                p->draining = 1; p->used = 0; p->started = now_ms();
+            }
         }
+        if (events[0].revents & POLLIN) accept_some(listener, clients);
         cursor = (cursor + 1) % CLIENTS;
     }
     for (int i = 0; i < CLIENTS; i++) if (clients[i].fd >= 0) close(clients[i].fd);
+    server_downloads_stop();
     free(clients); return result;
 }
