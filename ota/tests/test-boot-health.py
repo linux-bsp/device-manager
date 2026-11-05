@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 WORKSPACE=Path(__file__).resolve().parents[3]
-SOURCE=WORKSPACE/'bsp-base-external/board/ti/am625/rootfs-overlay/etc/init.d/S99fw-mark-good'
+SOURCE=WORKSPACE/'device-manager/integration/systemd/fw-confirm'
 class BootHealth(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='boot-health-');self.base=Path(self.tmp.name)
@@ -31,11 +31,12 @@ status)
 mark-good) exit "${MARK_EXIT:-0}" ;;
 esac
 ''');fw.chmod(0o755)
-        text=SOURCE.read_text().replace('/usr/sbin/fwctl',str(fw)).replace('interval=5','interval=0').replace('/run/fwctl-boot-confirmed',str(self.marker)).replace('/run/rcS.critical',str(self.base/'failed')).replace('/var/run/fw-mark-good.pid',str(self.base/'pid'))
-        text=text.replace('/run/fwctl-health.last',str(self.base/'health-last')).replace('\tsync\n','\t:\n').replace('\treboot\n','\techo reboot >> "$CALLS"\n')
+        text=SOURCE.read_text().replace('/usr/sbin/fwctl',str(fw)).replace('interval=5','interval=0').replace('/run/fwctl-boot-confirmed',str(self.marker)).replace('/run/device-manager/health-failed',str(self.base/'failed')).replace('/var/run/fw-mark-good.pid',str(self.base/'pid'))
+        text=text.replace('/run/fw-confirm-health.last',str(self.base/'health-last')).replace('\tsync\n','\t:\n').replace('\treboot\n','\techo reboot >> "$CALLS"\n')
         log=self.base/'logctl'
         log.write_text('#!/bin/sh\nprintf "boot-event:%s\\n" "$2" >> "$CALLS"\nexit "${LOG_EVENT_EXIT:-0}"\n');log.chmod(0o755)
         text=text.replace('/usr/sbin/logctl',str(log))
+        text=text[:text.rindex('[ \"${AUTO_MARK_GOOD')]+'mark_good_worker 1\n'
         self.script=self.base/'init';self.script.write_text(text)
     def tearDown(self):self.tmp.cleanup()
     def run_worker(self,**values):

@@ -67,8 +67,8 @@
 <div class="table-wrap"><table><thead><tr><th>设备</th><th>产品</th><th>最近结果</th><th>固件</th><th>最后上报</th></tr></thead><tbody id="dashboard-devices"></tbody></table></div></section>
 </section>
 <section id="devices-panel" hidden><section class="card"><div class="section-head"><div><h2>设备列表</h2><p class="muted">按设备上报汇总固件、网络身份与最近升级结果</p></div><span id="device-total" class="pill">0 台设备</span></div>
-<div class="toolbar"><label for="device-search">筛选设备</label><input id="device-search" type="search" placeholder="设备 ID、IP、MAC、hostname、产品或固件哈希"><span id="device-count" class="filter-count"></span></div>
-<div class="table-wrap"><table><thead><tr><th>设备 ID</th><th>网络地址</th><th>产品 / 布局</th><th>固件</th><th>最近结果</th><th>最后上报</th><th>操作</th></tr></thead><tbody id="device-list"></tbody></table></div>
+<div class="toolbar"><label for="device-search">筛选设备</label><input id="device-search" type="search" placeholder="设备 IP、MAC、hostname、产品或固件哈希"><span id="device-count" class="filter-count"></span></div>
+<div class="table-wrap"><table><thead><tr><th>设备 IP</th><th>Hostname</th><th>产品</th><th>固件</th><th>最近结果</th><th>最后上报</th><th>操作</th></tr></thead><tbody id="device-list"></tbody></table></div>
 <div id="device-empty" class="empty" hidden>暂无匹配的设备。</div><div id="device-detail" class="device-detail" hidden></div>
 </section></section>
 <div id="overview">
@@ -86,7 +86,7 @@
 <p id="upload-status" class="muted" aria-live="polite"></p>
 </form></section><section class="card"><h2>发布固件</h2><p class="muted">适用设备由固件包内的 HWID 固定声明，上传后自动解析；点击发布即更新全部匹配硬件，各 HWID 保留一个当前版本。</p>
 <div id="drafts-empty" class="empty" hidden>还没有上传固件。选择固件包并完成校验后，会显示在这里。</div>
-<div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>上传时间</th><th>操作</th><th>详情</th></tr></thead><tbody id="drafts"></tbody></table></div>
+<div class="table-wrap"><table id="drafts-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>上传时间</th><th>操作</th><th>详情</th><th>删除</th></tr></thead><tbody id="drafts"></tbody></table></div>
 </section></div><section class="card" role="tabpanel" id="panel-releases" aria-labelledby="tab-releases" hidden><h2>发布记录</h2>
 <div id="releases-empty" class="empty" hidden>尚未发布版本。</div>
 <div class="table-wrap"><table id="releases-table"><thead><tr><th>产品</th><th>固件版本</th><th>固件ID</th><th>大小</th><th>上传时间</th><th>操作</th><th>详情</th></tr></thead><tbody id="releases"></tbody></table></div>
@@ -99,6 +99,7 @@
 </main></div>
 <script>
 /* INLINE_TIME */
+/* INLINE_DEVICE_NAMES */
 /* INLINE_SOL */
 /* INLINE_SOL_NAMES */
 /* INLINE_SOL_BUNDLES */

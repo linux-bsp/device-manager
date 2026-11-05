@@ -258,3 +258,24 @@ int ota_catalog_network_json(const char *root, FILE *out, const struct ota_repor
     sqlite3_finalize(query);
     return result == SQLITE_DONE && !ferror(out) ? 0 : -1;
 }
+
+int ota_catalog_deletion(const char *root,const char *id,
+                         const struct ota_catalog_identity *identity,const char *status)
+{
+    if(database(root))return -1;
+    const char *schema="CREATE TABLE IF NOT EXISTS firmware_deletions ("
+        "id TEXT PRIMARY KEY,firmware_id TEXT NOT NULL,tag TEXT NOT NULL,hwids TEXT NOT NULL,"
+        "updated INTEGER NOT NULL,status TEXT NOT NULL);";
+    if(sqlite3_exec(catalog,schema,NULL,NULL,NULL)!=SQLITE_OK)return -1;
+    sqlite3_stmt *q=NULL;
+    const char *sql="INSERT INTO firmware_deletions VALUES(?1,?2,?3,?4,strftime('%s','now'),?5) "
+        "ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status";
+    if(sqlite3_prepare_v2(catalog,sql,-1,&q,NULL)!=SQLITE_OK)return -1;
+    sqlite3_bind_text(q,1,id,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(q,2,identity->hash,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(q,3,identity->tag,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(q,4,identity->hwids,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(q,5,status,-1,SQLITE_TRANSIENT);
+    int rc=sqlite3_step(q);sqlite3_finalize(q);
+    return rc==SQLITE_DONE?0:-1;
+}

@@ -1,0 +1,16 @@
+#!/bin/sh
+mkdir -p /run/logctl /data /sys/fs/pstore
+# Board storage preparation completes before this unit starts.
+# Never mount or format board storage from a logging service.
+storage_state=$(cat /run/device-manager/storage-state 2>/dev/null)
+if [ "$storage_state" = persistent ] && mountpoint -q /data && [ -w /data ]; then
+    mkdir -p /data/log/boots || exit 1
+    root=/data/log/boots
+else
+    root=/run/logctl/boots
+    mkdir -p "$root" || exit 1
+    echo "[logctld] [WARN] data storage state=${storage_state:-unknown}; logs are volatile until storage is healthy"
+fi
+mountpoint -q /sys/fs/pstore || mount -t pstore pstore /sys/fs/pstore 2>/dev/null || true
+exec /usr/sbin/logctld --root "$root"
+

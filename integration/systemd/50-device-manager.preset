@@ -1,0 +1,6 @@
+enable fwctld.service
+enable logctld.service
+enable logctl-journal.service
+enable fw-health.service
+enable fw-confirm.service
+enable device-shutdown-intent.service

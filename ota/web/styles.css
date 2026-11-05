@@ -205,3 +205,8 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; }
 .firmware-hwid code { font-size: 14px; font-weight: 600; }
 
 [data-hwid] { max-width: 100%; font-family: monospace; margin-bottom: 8px; }
+
+.delete-firmware{background:transparent;border:0;padding:0;color:#b42318;font:inherit;cursor:pointer}.delete-firmware:hover{text-decoration:underline}.delete-firmware:disabled{color:#98a2b3;cursor:not-allowed;text-decoration:none}
+#drafts-table td:first-child { max-width: 180px; white-space: normal; }
+#drafts-table td:nth-child(5) { max-width: 160px; white-space: normal; }
+#drafts-table .delete-firmware { margin-right: 0; }

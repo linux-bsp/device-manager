@@ -1,0 +1,19 @@
+[Unit]
+Description=Persistent boot logs and SOL
+Wants=bsp-data.service
+After=bsp-data.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+ExecStart=/usr/libexec/device-manager/logctld-start
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=12
+KillMode=mixed
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

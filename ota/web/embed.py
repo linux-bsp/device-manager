@@ -13,6 +13,7 @@ registry = load_registry(web.parents[1] / 'config/hwid-registry.json')
 page = (web / "index.html").read_text()
 for marker, filename in (
     ("/* INLINE_TIME */", "time-format.js"),
+    ("/* INLINE_DEVICE_NAMES */", "device-names.js"),
     ("/* INLINE_STYLES */", "styles.css"),
     ("/* INLINE_SOL */", "sol-console.js"),
     ("/* INLINE_SOL_NAMES */", "sol-names.js"),

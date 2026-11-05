@@ -46,7 +46,7 @@ async function clockRefresh(){
   const data=await r.json();clockView.data=data;clockView.received=performance.now();
   const select=$('clock-device'),selected=select.value;
   const ids=[...new Set([...data.devices.map(row=>row.device),...(fleetState?.devices||[]).map(row=>row.device),...(sol.rows||[]).map(row=>row.device)])].sort();
-  select.replaceChildren();for(const id of ids){const option=document.createElement('option');option.value=option.textContent=id;select.append(option);}
+  select.replaceChildren();for(const id of ids){const option=document.createElement('option');option.value=id;option.textContent=deviceLabel(data.devices.find(row=>row.device===id)||{device:id});option.title=id;select.append(option);}
   if(ids.includes(selected))select.value=selected;
   clockRender();
  })().finally(()=>{clockView.loading=null;});return clockView.loading;

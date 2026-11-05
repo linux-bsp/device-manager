@@ -87,7 +87,7 @@ int main(int argc,char **argv){
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I'+str(SOURCE/'shared'),'-I'+str(SOURCE.parent/'identity/include'),
                         '-I'+str(SOURCE/'agent'),str(source),str(SOURCE/'shared/ota-common.c'),
                         str(SOURCE/'shared/ota-report.c'),str(SOURCE/'agent/fwctld-network.c'),
-                        str(SOURCE/'agent/fwctld-log.c'),str(SOURCE/'agent/fwctld-state.c')]+transfer_flags(client=True)+['-o',str(cls.program)],check=True)
+                        str(SOURCE/'agent/fwctld-log.c'),str(SOURCE/'agent/fwctld-state.c'),str(SOURCE/'agent/fwctld-boot.c')]+transfer_flags(client=True)+['-o',str(cls.program)],check=True)
 
     @classmethod
     def tearDownClass(cls):

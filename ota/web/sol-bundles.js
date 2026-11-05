@@ -6,7 +6,7 @@ async function solWithBundles(rows) {
         const existing = combined.find(row => row.device === bundle.device && row.boot === bundle.boot);
         if (existing) existing.bundle = bundle;
         else combined.push({device: bundle.device, boot: bundle.boot, order: bundle.order,
-            seen: bundle.received, peer: bundle.peer, meta: '', bundle, bundleOnly: true});
+            seen: bundle.received, first_connected_at: bundle.first_connected_at, peer: bundle.peer, meta: '', bundle, bundleOnly: true});
     }
     return combined.sort((a, b) => a.device.localeCompare(b.device) || b.order - a.order);
 }

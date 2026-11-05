@@ -118,7 +118,7 @@ bool sol_bundle_route(int client,const struct server_context *context,const stru
     int writing=!strcmp(request->method,"POST");
     if(!writing&&!strcmp(request->path,"/api/sol/bundles")){
         if(strcmp(request->method,"GET")||request->length||!sol_view_access(context->directory,request->authorization)){reply(client,403,"{\"error\":\"Archive view rejected\"}");return true;}
-        sqlite3_stmt *s=statement(db,"SELECT json_object('device',device,'boot',boot,'hash',sha,'size',size,'received',received,'order',ord,'peer',peer) FROM bundles WHERE committed=1 ORDER BY device,ord DESC",NULL,NULL);
+        sqlite3_stmt *s=statement(db,"SELECT json_object('device',device,'boot',boot,'hash',sha,'size',size,'received',received,'first_connected_at',coalesce((SELECT first_seen FROM sol_connections c WHERE c.device=bundles.device AND c.boot=bundles.boot),received),'order',ord,'peer',peer) FROM bundles WHERE committed=1 ORDER BY device,ord DESC",NULL,NULL);
         if(!s){reply(client,503,"{}");return true;}
         char *text=NULL;size_t n=0;FILE *f=open_memstream(&text,&n);int step=SQLITE_ERROR,count=0;
         if(f){fputc('[',f);while((step=sqlite3_step(s))==SQLITE_ROW){if(count++)fputc(',',f);fputs((const char *)sqlite3_column_text(s,0),f);}fputc(']',f);if(fclose(f))step=SQLITE_ERROR;}

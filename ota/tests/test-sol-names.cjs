@@ -12,7 +12,7 @@ test('archive labels and downloads use the immutable server receipt in Beijing t
 test('same-second records have distinct names and retain their kind', () => {
     const other={...archive,boot:'ed0abacf-e728-47d6-a601-3929d05b0295',meta:'startup=healthy-current\n'};
     assert.notEqual(names.filename(archive,'all'),names.filename(other,'all'));
-    assert.match(names.label(archive),/上次未确认启动/);assert.match(names.label(other),/正常启动/);
+    assert.match(names.label(archive),/异常启动/);assert.match(names.label(other),/正常启动/);
 });
 test('unknown device or server clock never appears as a fabricated 1970 date', () => {
     assert.equal(names.stamp(0),null);assert.equal(names.stamp(NaN),null);
@@ -28,4 +28,20 @@ test('live console snapshots use export time instead of last heartbeat', () => {
 test('Beijing midnight rolls into the next date without a 24-hour filename', () => {
     const stamp = names.stamp(Date.UTC(2026,10,3,16,0,0)/1000);
     assert.equal(stamp.file,'2026-11-04_00-00-00+0800');
+});
+
+test('live and historical menus use fixed first connection timestamps, never boot UUID titles', () => {
+    const row={boot:'95d40d6b-844e-43df-874a-c0a9ce4350e4',first_connected_at:received,seen:received+86400,meta:'current=yes\nboot-health=confirmed\n'};
+    assert.equal(names.label(row),'2026-11-04 08:36:15 +08:00 · 正常启动（当前）');
+    assert.equal(names.label({...row,meta:'current=no\nboot-health=confirmed\n'}),'2026-11-04 08:36:15 +08:00 · 正常启动');
+    assert.equal(names.label({...row,seen:received+172800}),names.label(row));
+});
+
+test('pending, rejected and unknown records retain an honest startup status', () => {
+    const row={boot:'live-boot',first_connected_at:received};
+    assert.match(names.label({...row,meta:'current=yes\nboot-health=pending\nprevious-boot-health=confirmed\n'}), /启动中（当前）/);
+    assert.match(names.label({...row,meta:'current=no\nboot-health=pending\n'}), /异常启动/);
+    assert(!names.label(archive).includes('未确认'));
+    assert.match(names.label({...row,meta:'boot-health=confirmed\nsoftware-intent=health-rejected\n'}), /异常启动/);
+    assert.match(names.label({...row,bundleOnly:true}), /启动状态未知 · 完整日志包/);
 });

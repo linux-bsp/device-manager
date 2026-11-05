@@ -1,0 +1,16 @@
+[Unit]
+Description=Archive service messages without display prefixes
+Wants=logctld.service
+After=logctld.service systemd-journald.service
+
+[Service]
+Type=exec
+ExecStart=/usr/sbin/logctl run services /usr/bin/journalctl --follow --boot --output=cat --no-tail --no-pager _TRANSPORT=stdout _TRANSPORT=syslog _TRANSPORT=journal _TRANSPORT=driver
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=3
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

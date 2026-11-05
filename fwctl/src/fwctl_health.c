@@ -15,6 +15,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+int fwctl_systemd_unit_health(const char *unit);
+
+
+#ifndef FWCTL_SYSTEMD_RUNTIME
+#define FWCTL_SYSTEMD_RUNTIME "/run/systemd/system"
+#endif
+
+static int systemd_boot(void)
+{
+    return access(FWCTL_SYSTEMD_RUNTIME, F_OK) == 0;
+}
+
 struct health_check {
 	const char *name;
 	int (*run)(const struct fwctl_options *options);
@@ -41,7 +53,9 @@ static int health_check_boot(const struct fwctl_options *options)
 	struct stat st;
 
 	(void)options;
-	if (stat("/run/rcS.critical", &st) == 0 && st.st_size > 0)
+	if (systemd_boot() && stat("/run/device-manager/health-failed", &st) == 0)
+        return health_report("critical boot health failed: %s", "/run/device-manager/health-failed");
+	if (!systemd_boot() && stat("/run/rcS.critical", &st) == 0 && st.st_size > 0)
 		return health_report("a critical boot service failed: %s", "/run/rcS.critical");
 	return 0;
 }
@@ -83,6 +97,14 @@ static int health_check_pid(const char *name, const char *path)
 static int health_check_pids(const struct fwctl_options *options)
 {
 	(void)options;
+	if (systemd_boot()) {
+        char name[32] = {0};
+        FILE *file = fopen("/proc/1/comm", "r");
+        if (!file) return -EIO;
+        int ok = fgets(name, sizeof(name), file) && !strcmp(name, "systemd\n");
+        fclose(file);
+        return ok ? 0 : -EIO;
+    }
 	return health_check_pid("system_manager", "/run/system_manager.pid");
 }
 
@@ -105,6 +127,7 @@ static int health_check_manager(const struct fwctl_options *options)
 	int ret;
 
 	(void)options;
+	if (systemd_boot()) return 0; /* Required units are checked by the board profile. */
 	fd = osa_ipc_connect(OSA_IPC_DEFAULT_SOCKET, 1000);
 	if (fd < 0)
 		return health_pending("system_manager IPC is not ready: %s",
@@ -156,7 +179,7 @@ static int health_check_executables(const struct fwctl_options *options)
 
 	(void)options;
 	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
-		if (access(paths[i], X_OK) < 0)
+		if (!(systemd_boot() && i == 0) && access(paths[i], X_OK) < 0)
 			return health_report("%s is not executable", paths[i]);
 	return 0;
 }
@@ -202,7 +225,12 @@ static int health_check_profile(const struct fwctl_options *options)
             break;
         }
         *value++ = 0;
-        if (!strcmp(line, "required-netdev"))
+        if (!strcmp(line, "required-unit")) {
+            if (!systemd_boot()) result = -EIO;
+            else result = fwctl_systemd_unit_health(value);
+            if (result == -ETIMEDOUT) result = -EAGAIN;
+            if (result) fprintf(stderr, "[fwctl] [WARN] required unit not healthy: %s (%d)\n", value, result);
+        } else if (!strcmp(line, "required-netdev"))
             result = health_check_netdev(value);
         else if (!strcmp(line, "required-path")) {
             struct stat st;

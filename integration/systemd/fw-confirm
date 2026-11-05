@@ -1,0 +1,114 @@
+#!/bin/sh
+
+[ -r /etc/default/fwctl ] && . /etc/default/fwctl
+
+
+health_check()
+{
+	/usr/sbin/fwctl health-check
+}
+
+wait_until_stable()
+{
+	checks=6
+	interval=5
+	count=0
+	attempt=0
+	limit=24
+	waiting=0
+
+	while [ "$attempt" -lt "$limit" ]; do
+		[ "$interval" -eq 0 ] || sleep "$interval"
+		attempt=$((attempt + 1))
+		health_check > /run/fw-confirm-health.last 2>&1
+		result=$?
+		case "$result" in
+			0)
+				waiting=0
+				count=$((count + 1))
+				[ "$count" -lt "$checks" ] || return 0
+				;;
+			75)
+				count=0
+				if [ "$waiting" -eq 0 ]; then
+					cat /run/fw-confirm-health.last >&2
+					waiting=1
+				fi
+				;;
+			*)
+				cat /run/fw-confirm-health.last >&2
+				echo "[fwctl] [ERROR] boot health failed" >&2
+				return 1
+				;;
+		esac
+	done
+	echo "[fwctl] [ERROR] boot health did not stabilize within the observation deadline" >&2
+	return 1
+}
+
+deployment_is_confirmed()
+{
+	deployment=$1
+	status=$(/usr/sbin/fwctl \
+		--config "${FWCTL_CONFIG:-/etc/device-manager/firmware.conf}" status 2>/dev/null) ||
+		return 1
+	printf '%s\n' "$status" |
+		grep -q "^deployment ${deployment}: .* successful=1 "
+}
+
+record_boot_event()
+{
+    [ ! -x /usr/sbin/logctl ] || /usr/sbin/logctl boot-event "$1" ||
+        echo "[fwctl] [WARN] boot event could not be persisted" >&2
+}
+
+record_mark_good_failure()
+{
+	failure_file=/run/device-manager/health-failed
+	failure="fw-confirm:1"
+	grep -qx "$failure" "$failure_file" 2>/dev/null ||
+		printf '%s\n' "$failure" >> "$failure_file"
+}
+
+mark_good_worker()
+{
+	deployment=$1
+	trap 'exit 1' HUP INT TERM
+
+	if ! wait_until_stable; then
+		record_mark_good_failure
+		status=$(/usr/sbin/fwctl --config "${FWCTL_CONFIG:-/etc/device-manager/firmware.conf}" status 2>/dev/null)
+		if printf '%s\n' "$status" | grep -q "^active: .* pending: ${deployment} "; then
+			if /usr/sbin/fwctl --config "${FWCTL_CONFIG:-/etc/device-manager/firmware.conf}" mark-bad "$deployment"; then
+				echo "[fwctl] [ERROR] candidate rejected by boot health; rebooting to the confirmed deployment" >&2
+				record_boot_event health-rejected
+				sync
+				reboot
+			fi
+		fi
+		return 1
+	fi
+	if deployment_is_confirmed "$deployment"; then
+		printf '%s\n' "$deployment" > /run/fwctl-boot-confirmed
+		record_boot_event health-confirmed
+		/usr/sbin/fwctl recovery maintain || echo "[fwctl] [WARN] recovery maintenance deferred" >&2
+		return 0
+	fi
+	if /usr/sbin/fwctl \
+		--config "${FWCTL_CONFIG:-/etc/device-manager/firmware.conf}" \
+		mark-good; then
+		printf '%s\n' "$deployment" > /run/fwctl-boot-confirmed
+		echo "[fwctl] [INFO] current deployment marked good"
+		record_boot_event health-confirmed
+		/usr/sbin/fwctl recovery maintain || echo "[fwctl] [WARN] recovery maintenance deferred" >&2
+		return 0
+	fi
+
+	echo "[fwctl] [ERROR] failed to confirm current deployment" >&2
+	record_mark_good_failure
+	return 1
+}
+
+[ "${AUTO_MARK_GOOD:-0}" = 1 ] || exit 0
+deployment=$(sed -n 's/.*fw\.deployment=\([01]\).*/\1/p' /proc/cmdline)
+case "$deployment" in 0|1) mark_good_worker "$deployment" ;; *) exit 1 ;; esac

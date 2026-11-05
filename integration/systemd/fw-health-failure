@@ -1,0 +1,13 @@
+#!/bin/sh
+mkdir -p /run/device-manager
+printf '%s\n' 'systemd-health-failed' > /run/device-manager/health-failed
+for result in /run/fwctl-health.last /run/fw-confirm-health.last; do
+    [ ! -r "$result" ] || cat "$result" >&2
+done
+echo '[fwctl] [ERROR] critical local health failed; requesting controlled reboot' >&2
+deployment=$(sed -n 's/.*fw\.deployment=\([01]\).*/\1/p' /proc/cmdline)
+status=$(timeout -s KILL 3 fwctl status 2>/dev/null)
+if printf '%s\n' "$status" | grep -q "^active: .* pending: ${deployment} "; then
+    timeout -s KILL 3 fwctl mark-bad "$deployment" || true
+fi
+logctl boot-event health-rejected || true

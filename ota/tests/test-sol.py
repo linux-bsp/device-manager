@@ -51,6 +51,29 @@ class SOL(unittest.TestCase):
         return self.request(f'/api/sol/push/{device}/{boot}/{order}/{stage}/{gen}/{offset}',data=body,key=self.key if key is None else key)
     def logs(self,boot='boot-a',stage='all',cursor=0):
         status,rows=self.request(f'/api/sol/logs/device-a/{boot}/{stage}/{cursor}');self.assertEqual(status,200);return rows
+    def test_first_connection_is_immutable_across_pushes_and_restart(self):
+        self.assertEqual(self.push(body=b'x')[0],200)
+        row=self.request('/api/sol/devices')[1][0]
+        first=row['first_connected_at'];self.assertEqual(row['connection_time_source'],'sol')
+        with database(self.feed/'sol.db') as db:
+            db.execute("UPDATE boots SET seen=seen+100")
+        self.assertEqual(self.push(stage='meta',body=b'current=yes\n')[0],200)
+        self.stop();self.start()
+        self.assertEqual(self.request('/api/sol/devices')[1][0]['first_connected_at'],first)
+    def test_legacy_connection_uses_oldest_audited_request(self):
+        self.push()
+        self.stop()
+        with database(self.feed/'sol.db') as db:
+            db.execute('DROP TABLE sol_connections')
+            db.execute('UPDATE boots SET seen=1790001000')
+        with database(self.feed/'firmware.db') as db:
+            db.execute('CREATE TABLE device_requests(device TEXT,request_boot TEXT,first_seen INTEGER)')
+            db.executemany('INSERT INTO device_requests VALUES(?,?,?)',[('device-a','boot-a',1790000000),('device-a','boot-a',1790000100)])
+        self.start()
+        row=self.request('/api/sol/devices')[1][0]
+        self.assertEqual(row['first_connected_at'],1790000000)
+        self.assertEqual(row['connection_time_source'],'ota-history')
+
     def test_credentials_and_method_boundaries(self):
         self.assertEqual(self.request('/api/sol/devices',key='0'*64)[0],403)
         self.assertEqual(self.push(device='device-b')[0],403)

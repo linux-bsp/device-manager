@@ -2,6 +2,9 @@
 
 let fleetState = null;
 let selectedDevice = '';
+function deviceLabel(row, historical = false) {
+  return DeviceNames.label(historical || row.peer ? row : {device:row.device}, fleetState, sol.rows || [], historical);
+}
 const phaseNames = {
   requested: '请求升级', installing: '正在安装', rebooting: '等待重启',
   'boot-testing': '健康检查中', success: '升级成功', 'install-failed': '安装失败',
@@ -55,7 +58,7 @@ function renderDeviceDetail(device, data) {
   panel.replaceChildren();
   if (!device) { panel.hidden = true; return; }
   panel.hidden = false;
-  const head = fleetText(panel,'h3','设备 '+device.device);
+  const head = fleetText(panel,'h3','设备 '+deviceLabel(device));
   head.className = 'device-id';
   const dl = document.createElement('dl'); panel.append(dl);
   const values = [
@@ -63,7 +66,8 @@ function renderDeviceDetail(device, data) {
     ['HWID',device.hwid||'未知'],
     ['固件版本', device.release?.tag || '未知'],
     ['固件 ID', device.release?.firmware_id || '未知'],
-    ['IP 地址', device.network?.ip || '未上报'],
+    ['IP 地址', deviceLabel(device)],
+    ['内部设备标识', device.device],
     ['MAC 地址', device.network?.mac || '未上报'],
     ['Hostname', device.network?.hostname || '未上报'],
     ['最近 OTA 结果', fleetPhase(device.phase)],
@@ -76,7 +80,7 @@ function renderDeviceDetail(device, data) {
     dl.append(item);
   }
   const links = document.createElement('div');links.className='quick-links';panel.append(links);
-  for (const [label,href] of [['查看升级历史','/#history'],['打开 SOL 日志','/#sol']]) {
+  for (const [label,href] of [['查看升级历史','/#history'],['打开 SOL 日志','/?sol_device='+encodeURIComponent(device.device)+'#sol']]) {
     const a=document.createElement('a');a.href=href;a.textContent=label;links.append(a);
   }
   const transactions=(data.device_history||[]).filter(row=>row.device===device.device)
@@ -115,14 +119,14 @@ function renderFleet(data) {
     const li=document.createElement('li');activity.append(li);
     const dot=document.createElement('span');dot.className='dot '+fleetTone(item.phase);li.append(dot);
     const body=document.createElement('div');li.append(body);
-    fleetText(body,'strong',item.device+' · '+fleetPhase(item.phase));
+    fleetText(body,'strong',deviceLabel(item,true)+' · '+fleetPhase(item.phase));
     const release=(data.releases||[]).find(r=>r.publication===item.publication);
     fleetText(body,'small',(release?.tag||'版本未知')+' / '+(release?.firmware_id||'').slice(0,8)+' · '+fleetTime(item.updated));
   }
   const overview=$('dashboard-devices');overview.replaceChildren();
   for(const item of devices.slice(0,5)){
     const row=document.createElement('tr');overview.append(row);
-    fleetText(row,'td',item.device,'device-id');fleetText(row,'td',FirmwareHardware.product(item.hwid));
+    fleetText(row,'td',deviceLabel(item),'device-id');fleetText(row,'td',FirmwareHardware.product(item.hwid));
     fleetPill(fleetText(row,'td',''),fleetPhase(item.phase),fleetTone(item.phase));
     fleetText(row,'td',(item.release?.tag||'未知')+' / '+(item.release?.firmware_id||'').slice(0,8));
     fleetText(row,'td',fleetTime(item.seen));
@@ -136,9 +140,8 @@ function renderFleet(data) {
     if(query&&!query.split(/\s+/).every(token=>searchable.includes(token)))continue;
     shown++;
     const row=document.createElement('tr');list.append(row);
-    fleetText(row,'td',item.device,'device-id');
-    const network=fleetText(row,'td',item.network?.ip||'未上报');
-    if(item.network?.hostname)fleetText(network,'small',item.network.hostname);
+    fleetText(row,'td',deviceLabel(item),'device-id');
+    fleetText(row,'td',item.network?.hostname||'未上报');
     fleetText(row,'td',FirmwareHardware.product(item.hwid));
     const firmware=fleetText(row,'td',(item.release?.tag||'未知')+' / '+(item.release?.firmware_id||'').slice(0,8));
     firmware.title=item.release?.firmware_id||'';

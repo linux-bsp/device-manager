@@ -1,0 +1,15 @@
+[Unit]
+Description=Record shutdown before stopping device services
+After=fwctld.service logctld.service logctl-journal.service psatellited.service pdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/bin/touch /run/shutdown
+ExecStop=-/usr/sbin/logctl boot-event shutdown
+RemainAfterExit=yes
+TimeoutStopSec=4
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

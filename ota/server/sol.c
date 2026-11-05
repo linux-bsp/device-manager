@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "sol.h"
+#include "sol-connections.h"
 #include "sol-evidence.h"
 #include "sol-startup.h"
 #include "sol-delete.h"
@@ -79,7 +80,7 @@ static int setup(const char *root)
         "CREATE TABLE IF NOT EXISTS streams(device TEXT,boot TEXT,stage TEXT,gen INTEGER,pos INTEGER,PRIMARY KEY(device,boot,stage,gen),FOREIGN KEY(device,boot) REFERENCES boots ON DELETE CASCADE);"
         "CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,device TEXT,boot TEXT,stage TEXT,gen INTEGER,off INTEGER,data TEXT,FOREIGN KEY(device,boot,stage,gen) REFERENCES streams ON DELETE CASCADE);"
         "CREATE INDEX IF NOT EXISTS chunks_device ON chunks(device,id);";
-    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db)||sol_startup_evidence_schema(db)||sol_retention_schema(db)||sol_bundle_schema(db))return -1;
+    if(sqlite3_exec(db,sql,NULL,NULL,NULL)!=SQLITE_OK||sol_evidence_schema(db)||sol_startup_schema(db)||sol_delete_schema(db)||sol_startup_evidence_schema(db)||sol_retention_schema(db)||sol_bundle_schema(db)||sol_connections_schema(db,root))return -1;
     snprintf(dbroot,sizeof(dbroot),"%s",root);return 0;
 }
 int sol_ota_event(const char *root,const struct ota_report *report,const char *observed_boot)
@@ -166,6 +167,8 @@ int sol_request(const char *root,const char *method,const char *path,const char 
         sqlite3_bind_int64(s,3,order);sqlite3_bind_int64(s,4,time(NULL));sqlite3_bind_text(s,5,peer,-1,SQLITE_TRANSIENT);
         sqlite3_bind_text(s,6,!strcmp(stage,"meta")?body:"",!strcmp(stage,"meta")?(int)length:0,SQLITE_TRANSIENT);
         if(finish(s))goto fail;
+        s=statement("INSERT OR IGNORE INTO sol_connections VALUES(?1,?2,unixepoch(),'sol')",device,boot,NULL,-1);
+        if(finish(s))goto fail;
         long long next=0;int status=200;
         if(strcmp(stage,"meta")) {
             s=statement("INSERT OR IGNORE INTO streams VALUES(?1,?2,?3,?4,0)",device,boot,stage,gen);
@@ -207,7 +210,7 @@ fail:
         return code;
     }
     sqlite3_stmt *s=NULL;gen=0;
-    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT device,boot,ord,seen,peer,meta,archived FROM (SELECT device,boot,ord,seen,peer,meta,0 archived FROM boots UNION ALL SELECT device,boot,0,seen,peer,meta,1 FROM startup_boots WHERE committed=1) ORDER BY device,archived,ord DESC,seen DESC",NULL,NULL,NULL,-1);
+    if(!strcmp(path,"/api/sol/devices"))s=statement("SELECT rows.device,rows.boot,ord,seen,peer,meta,archived,COALESCE(c.first_seen,seen),COALESCE(c.source,'archive-receipt') FROM (SELECT device,boot,ord,seen,peer,meta,0 archived FROM boots UNION ALL SELECT device,boot,0,seen,peer,meta,1 FROM startup_boots WHERE committed=1) rows LEFT JOIN sol_connections c ON c.device=rows.device AND c.boot=rows.boot ORDER BY rows.device,archived,ord DESC,seen DESC",NULL,NULL,NULL,-1);
     else {
         if(sscanf(path,"/api/sol/logs/%63[^/]/%63[^/]/%63[^/]/%lld%c",device,boot,stage,&offset,&extra)!=4||!identifier(device)||!identifier(boot)||(!stage_valid(stage)&&strcmp(stage,"all"))||offset<0)
             return reply(out,400,"{\"error\":\"Invalid log query\"}");
@@ -234,6 +237,8 @@ fail:
             fprintf(f,",\"order\":%lld,\"seen\":%lld,\"peer\":",sqlite3_column_int64(s,2),sqlite3_column_int64(s,3));
             json_string(f,(const char*)sqlite3_column_text(s,4));
             fprintf(f,",\"archive_received_at\":%lld",sqlite3_column_int(s,6)?sqlite3_column_int64(s,3):0);
+            fprintf(f,",\"first_connected_at\":%lld,\"connection_time_source\":",sqlite3_column_int64(s,7));
+            json_string(f,(const char*)sqlite3_column_text(s,8));
             fputs(",\"meta\":",f);json_string(f,(const char*)sqlite3_column_text(s,5));fputs("}",f);
         }else{
             fprintf(f,"{\"raw\":%s,\"id\":%lld,\"stage\":",gen?"true":"false",sqlite3_column_int64(s,0));json_string(f,(const char*)sqlite3_column_text(s,1));

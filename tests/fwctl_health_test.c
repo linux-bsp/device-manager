@@ -4,6 +4,7 @@
 #include <stdarg.h>
 static char profile_path[256];
 #define FWCTL_HEALTH_PROFILE profile_path
+#define FWCTL_SYSTEMD_RUNTIME "/nonexistent/test-systemd"
 #include "../fwctl/src/fwctl_health.c"
 
 static int link_absent;

@@ -13,12 +13,20 @@ const SolNames = {
     },
     archived(row) { return /(?:^|\n)startup=/.test(row?.meta || ''); },
     short(row) { return (row?.boot || 'unknown').replace(/[^a-z0-9_-]/gi, '').slice(0, 8) || 'unknown'; },
+    outcome(row) {
+        const meta = Object.fromEntries((row.meta || '').split('\n').filter(line => line.includes('='))
+            .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+        if (meta['software-intent'] === 'health-rejected') return '异常启动';
+        if (meta.startup === 'healthy-current' || meta['boot-health'] === 'confirmed') return '正常启动';
+        if (meta.startup === 'previous-unconfirmed') return '异常启动';
+        if (meta['boot-health'] === 'pending') return meta.current === 'no' ? '异常启动' : '启动中';
+        return '启动状态未知';
+    },
     label(row) {
-        if (row.bundleOnly) return `${this.stamp(row.bundle.received)?.label || '接收时间未知'} · 完整日志包 · ${this.short(row)}`;
-        if (!this.archived(row)) return row.boot + ((row.meta || '').includes('current=yes') ? '（当前）' : '');
-        const time = this.stamp(row.archive_received_at ?? row.seen);
-        const kind = (row.meta || '').includes('startup=healthy-current') ? '正常启动' : '上次未确认启动';
-        return `${time?.label || '接收时间未知'} · ${kind} · ${this.short(row)}`;
+        const time = this.stamp(row.first_connected_at ?? (this.archived(row) ? row.archive_received_at : row.bundle?.first_connected_at) ?? row.bundle?.received ?? row.seen);
+        const title = time?.label || '接收时间未知';
+        const current = /(?:^|\n)current=yes(?:\n|$)/.test(row.meta || '') ? '（当前）' : '';
+        return `${title} · ${this.outcome(row)}${current}${row.bundleOnly ? ' · 完整日志包' : ''}`;
     },
     filename(row, stage, exportedAt = Math.floor(Date.now() / 1000)) {
         const archived = this.archived(row);

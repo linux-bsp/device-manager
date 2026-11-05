@@ -1,0 +1,19 @@
+[Unit]
+Description=Local firmware health policy
+Wants=systemd-networkd.service
+After=systemd-networkd.service
+OnFailure=fw-health-failure.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+ExecStart=/usr/libexec/device-manager/fw-health-monitor
+WatchdogSec=15s
+TimeoutStartSec=150s
+TimeoutStopSec=5s
+KillMode=control-group
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

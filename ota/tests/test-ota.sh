@@ -154,7 +154,11 @@ cmp "$scratch/cache/1010001000110000/current" "$scratch/previous"
 [ ! -e "$scratch/cache/1010001000110000/3" ]
 rm "$scratch/feed/releases/3/rootfs.itb"
 ln -s "$scratch/source/rootfs.itb" "$scratch/feed/releases/3/rootfs.itb"
-[ "$(http -o /dev/null -w '%{http_code}' "$url/releases/3/rootfs.itb")" = 404 ]
+# The catalog may reject the changed payload before the file route checks it.
+case "$(http -o /dev/null -w '%{http_code}' "$url/releases/3/rootfs.itb")" in
+    404|503) ;;
+    *) exit 1 ;;
+esac
 # The server must reject directory symlinks, not just file symlinks.
 ln -s "$scratch/source" "$scratch/feed/releases/4"
 [ "$(http -o /dev/null -w '%{http_code}' "$url/releases/4/kernel.itb")" = 404 ]

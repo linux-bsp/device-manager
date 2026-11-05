@@ -85,11 +85,26 @@ class InitScript(unittest.TestCase):
         self.mac.unlink();self.assertNotEqual(self.run_script().returncode,0)
         self.assertFalse(self.calls.exists())
 
+class SystemdInitScript(InitScript):
+    def setUp(self):
+        super().setUp()
+        native=Path(__file__).resolve().parents[2]/'integration/systemd/fwctld-start'
+        text=native.read_text().replace('/etc/default/fwctld',str(self.config)).replace('/data/fwctld.conf',str(self.root/'override')).replace('/sys/class/net/eth0/address',str(self.mac)).replace('/usr/sbin/fwctl ',str(self.bin/'fwctl')+' ').replace('/usr/sbin/fwctld',str(self.bin/'fwctld'))
+        self.script.write_text(text)
+        stub=self.bin/'fwctld';stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$TEST_CALLS"\n');stub.chmod(0o755)
+    def test_console_default_and_disable(self):
+        self.assertEqual(self.run_script().returncode,0)
+        self.assertNotIn('--console',self.calls.read_text())
+    def test_new_service_paths(self):
+        self.assertEqual(self.run_script().returncode,0)
+        self.assertIn('--state-dir\n/data/fwctld-state\n',self.calls.read_text())
+        self.assertNotIn('--background',self.calls.read_text())
+
 class BoardInitScripts(unittest.TestCase):
     board=SOURCE.parents[2]/'board/ti/am625'
 
     def test_all_service_shell_syntax(self):
-        files=list((self.board/'rootfs-overlay/etc/init.d').glob('*'))+[SOURCE]
+        files=list((self.board/'rootfs-overlay/usr/libexec/bsp').glob('*'))+list((SOURCE.parents[3]/'device-manager/integration/systemd').glob('*'))+[SOURCE]
         for path in files:
             if path.is_file() and path.read_bytes().startswith(b'#!/bin/sh'):
                 with self.subTest(script=path.name):
@@ -97,7 +112,7 @@ class BoardInitScripts(unittest.TestCase):
                     self.assertEqual(r.returncode,0,r.stderr)
 
     def test_version_success_failure_and_stop(self):
-        source=(self.board/'rootfs-overlay/etc/init.d/S99fw-version').read_text()
+        source=(self.board/'rootfs-overlay/usr/libexec/bsp/firmware-version').read_text()
         with tempfile.TemporaryDirectory(prefix='version-init-') as tmp:
             root=Path(tmp);calls=root/'calls';stub=root/'fwctl';script=root/'version'
             stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_CALLS"\nexit "$TEST_EXIT"\n');stub.chmod(0o755)

@@ -1,0 +1,39 @@
+#!/bin/sh
+# All service liveness is managed by systemd. This loop evaluates board policy.
+# Explicit bench fault injection only; never reject an already confirmed image.
+for argument in $(cat /proc/cmdline); do
+    case "$argument" in
+        fw.rollback_test=1)
+            deployment=$(sed -n 's/.*fw\.deployment=\([01]\).*/\1/p' /proc/cmdline)
+            status=$(timeout -s KILL 3 fwctl status) || exit 1
+            if ! printf '%s\n' "$status" | grep -q "^deployment ${deployment}: .* successful=1 "; then
+                touch /run/fw-rollback-test.active
+            fi
+            ;;
+    esac
+done
+ready=0
+pending=0
+while :; do
+    timeout -s KILL 4 /usr/sbin/fwctl health-check > /run/fwctl-health.last 2>&1
+    result=$?
+    case "$result" in
+        0)
+            pending=0
+            if [ "$ready" -eq 0 ]; then
+                systemd-notify --ready || exit 1
+                ready=1
+            fi
+            ;;
+        75)
+            pending=$((pending + 1))
+            if [ "$ready" -eq 1 ] && [ "$pending" -ge 3 ]; then
+                cat /run/fwctl-health.last >&2
+                exit 1
+            fi
+            ;;
+        *) cat /run/fwctl-health.last >&2; exit 1 ;;
+    esac
+    systemd-notify WATCHDOG=1 || exit 1
+    sleep 5
+done

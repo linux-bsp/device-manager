@@ -62,11 +62,12 @@ try {
     }
     await rpc('Runtime.enable');await rpc('Page.enable');
     await rpc('Emulation.setDeviceMetricsOverride',{width:1280,height:1000,deviceScaleFactor:1,mobile:false});
-    const seeded=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1','X-OTA-HWID':'1010001000110000'},
+    const context={'X-OTA-Request':'1','X-OTA-HWID':'1010001000110000','X-OTA-Device':'browser-test','X-OTA-IP':'192.0.2.10','X-OTA-MAC':'1c:63:49:22:c4:f7','X-OTA-Hostname':'browser-board','X-OTA-Boot':'test-boot'};
+    const seeded=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:context,
         body:'BSPOTASTATE3 browser-test 1010001000110000 1 65537 test-boot success 1 65537 not-reported\n'});
     assert.equal(seeded.status,200,'Device report should be persisted');
     for (const phase of ['installing','install-failed']) {
-        const r=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{'X-OTA-Request':'1','X-OTA-HWID':'1010001000110000'},
+        const r=await fetch(url+'/api/devices/browser-test',{method:'POST',headers:{...context,'X-OTA-Boot':'next-boot'},
             body:`BSPOTASTATE3 browser-test 1010001000110000 2 65538 next-boot ${phase} 0 65537 not-reported\n`});
         assert.equal(r.status,200);
     }
@@ -77,6 +78,7 @@ try {
     await screenshot('dashboard-desktop.png');
     await evaluate("document.querySelector('#module-devices').click()");
     await until(()=>evaluate("!document.querySelector('#devices-panel').hidden && document.querySelectorAll('#device-list tr').length===1"),'Device list');
+    assert.equal(await evaluate("document.querySelector('#device-list tr td').textContent"),'192.0.2.10','Device IP is the primary display name');
     await evaluate("document.querySelector('#device-search').value='H200 CCM 桥接板';document.querySelector('#device-search').dispatchEvent(new Event('input'))");
     assert.equal(await evaluate("document.querySelectorAll('#device-list tr').length"),1,'Device search by registered names');
     await evaluate("document.querySelector('#device-search').value='';document.querySelector('#device-search').dispatchEvent(new Event('input'))");
@@ -85,7 +87,7 @@ try {
     await screenshot('device-detail-desktop.png');
     await evaluate("document.querySelector('#module-ota').click()");
     await until(()=>evaluate("!document.querySelector('#overview').hidden"),'OTA module');
-    await until(()=>evaluate("document.querySelector('#devices')?.textContent.includes('browser-test') && document.querySelector('#devices').textContent.includes('升级成功')"),'device result table');
+    await until(()=>evaluate("document.querySelector('#devices')?.textContent.includes('192.0.2.10') && document.querySelector('#devices').textContent.includes('升级成功')"),'device result table');
     assert.equal(await evaluate("document.querySelectorAll('#devices tr').length"),2);
     await evaluate("document.querySelector('#devices details').open=true");
     assert(await evaluate("document.querySelector('#devices details').textContent.includes('正在安装') && document.querySelector('#devices details').textContent.includes('安装失败')"));
@@ -102,9 +104,20 @@ try {
     },'upload and validation');
     const uploaded=await (await fetch(url+'/api/state')).json();
     assert.equal(uploaded.latest,before.latest,'Upload must not publish');
-    const draft=uploaded.drafts.find(d=>!before.drafts.some(old=>old.id===d.id));
+    let draft=uploaded.drafts.find(d=>!before.drafts.some(old=>old.id===d.id));
     assert(draft && !draft.publication,'New draft should be unpublished');
     assert(draft.tag && draft.firmware_id);
+    assert(await evaluate(`!document.querySelector('[data-delete="${draft.id}"]').disabled`),'Unpublished firmware can be deleted');
+    await evaluate('window.confirm=()=>false');
+    await evaluate(`document.querySelector('[data-delete="${draft.id}"]').click()`);
+    assert((await (await fetch(url+'/api/state')).json()).drafts.some(d=>d.id===draft.id),'Cancel preserves upload');
+    await evaluate('window.confirm=()=>true');
+    await evaluate(`document.querySelector('[data-delete="${draft.id}"]').click()`);
+    await until(()=>evaluate("document.querySelector('#notice').textContent.includes('固件已删除') && document.querySelectorAll('#drafts tr').length===0"),'Delete firmware row');
+    const replacement=await fetch(url+'/api/upload',{method:'POST',headers:{'X-OTA-Request':'1','Content-Type':'application/octet-stream'},body:await readFile(bundle)});
+    assert.equal(replacement.status,201);const replacementId=(await replacement.json()).id;
+    draft=(await (await fetch(url+'/api/state')).json()).drafts.find(d=>d.id===replacementId);
+    await evaluate('state()');
     const expectedTag=draft.tag;
     await until(()=>evaluate("document.querySelector('#drafts').textContent.includes('计算载荷 · H200 · CCM 桥接板 · PCB v1.0')"),'registered hardware names');
     async function screenshot(name){
@@ -112,6 +125,7 @@ try {
         await writeFile(join(outputDir,name),Buffer.from(data,'base64'));
     }
     assert(await evaluate("!document.querySelector('[data-hwid]') && !document.querySelector('select[aria-label=\"目标 HWID\"]')"),'Firmware hardware scope is read-only');
+    assert(await evaluate("document.querySelector('#drafts .delete-firmware').getBoundingClientRect().right <= document.querySelector('#drafts-table').parentElement.getBoundingClientRect().right"),'Delete action visible on desktop without horizontal scrolling');
     await screenshot('uploaded-desktop.png');
     await evaluate(`document.querySelector('[data-publish="${draft.id}"]').click()`);
     await until(()=>evaluate("document.querySelector('#notice').textContent.startsWith('已发布，适用设备由固件包内的 HWID 声明确定。')"),'publish button');
@@ -121,6 +135,7 @@ try {
     },'latest publication');
     await until(()=>evaluate(`document.querySelector('#drafts .publishing')?.closest('tr').textContent.includes(${JSON.stringify(expectedTag)}) && !document.querySelector('[data-publish]')`),'published UI');
     const after=await (await fetch(url+'/api/state')).json();
+    assert(await evaluate("document.querySelector('#drafts .delete-firmware').disabled"),'Active firmware deletion disabled');
     assert(await evaluate("document.querySelector('.upload-card').getBoundingClientRect().width > document.querySelector('#panel-manage').getBoundingClientRect().width-2 && document.querySelector('.upload-card').getBoundingClientRect().height < 200 && document.querySelector('#upload-button').getBoundingClientRect().left >= document.querySelector('#firmware').getBoundingClientRect().right"),'Full width horizontal upload strip');
     assert(await evaluate("document.querySelector('#drafts-table').closest('.card').getBoundingClientRect().width > document.querySelector('#panel-manage').getBoundingClientRect().width-2"),'Full width publishing');
     assert(await evaluate("!document.querySelector('#panel-manage').textContent.includes('01 /') && !document.querySelector('#panel-manage').textContent.includes('02 /')"));
@@ -160,9 +175,9 @@ try {
         await search(tab,'');
     }
     for(const table of ['drafts','releases']){
-        assert.deepEqual(await evaluate(`[...document.querySelectorAll('#${table}-table th')].map(x=>x.textContent)`),['产品','固件版本','固件ID','大小','上传时间','操作','详情']);
+        assert.deepEqual(await evaluate(`[...document.querySelectorAll('#${table}-table th')].map(x=>x.textContent)`),['产品','固件版本','固件ID','大小','上传时间','操作','详情',...(table==='drafts'?['删除']:[])]);
         const uploaded=await evaluate(`document.querySelector('#${table} tr').children[4].textContent`);
-        assert.equal(uploaded,await evaluate(`new Intl.DateTimeFormat('zh-CN',{timeZone:'Etc/GMT-8',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(${draft.uploaded_at}*1000)+' +08:00'`),'Original upload time in '+table);
+        assert.equal(uploaded,await evaluate(`new Intl.DateTimeFormat('zh-CN',{timeZone:'Etc/GMT-8',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(${after.releases.find(x=>x.published).uploaded_at}*1000)+' +08:00'`),'Original upload time in '+table);
     }
     await evaluate("document.querySelector('#tab-manage').click()");
     assert(await evaluate("!document.querySelector('#overview a.download')"),'Download only in details');

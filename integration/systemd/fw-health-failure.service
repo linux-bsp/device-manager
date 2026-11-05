@@ -1,0 +1,11 @@
+[Unit]
+Description=Record critical failure and reject pending firmware
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/device-manager/fw-health-failure
+ExecStartPost=/usr/bin/systemctl --no-block reboot
+TimeoutStartSec=12
+StandardOutput=journal+console
+StandardError=journal+console

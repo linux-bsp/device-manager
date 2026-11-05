@@ -1,0 +1,52 @@
+#!/bin/sh
+
+[ -r /etc/default/fwctld ] && . /etc/default/fwctld
+[ -r /data/fwctld.conf ] && . /data/fwctld.conf
+
+# Use shell builtins only: small BusyBox images need not provide tr.
+device_id_from_mac()
+{
+    IFS=: read -r mac1 mac2 mac3 mac4 mac5 mac6 < /sys/class/net/eth0/address || return 1
+    for octet in "$mac1" "$mac2" "$mac3" "$mac4" "$mac5" "$mac6"; do
+        case "$octet" in
+            [[:xdigit:]][[:xdigit:]]) ;;
+            *) return 1 ;;
+        esac
+    done
+    printf '%s-%s-%s-%s-%s-%s' "$mac1" "$mac2" "$mac3" "$mac4" "$mac5" "$mac6"
+}
+
+[ "${FWCTLD_ENABLED:-0}" = 1 ] || exit 0
+[ -n "$FWCTLD_SERVER" ] || { echo "[fwctld] [ERROR] set FWCTLD_SERVER" >&2; exit 1; }
+cache_store=$FWCTLD_CACHE
+case "$FWCTLD_CACHE" in
+    /data/*)
+        storage_state=$(cat /run/device-manager/storage-state 2>/dev/null)
+        if [ "$storage_state" != persistent ] || ! mountpoint -q /data || [ ! -w /data ]; then
+            echo "[fwctld] [WARN] data storage state=${storage_state:-unknown}; using volatile /tmp/fwctld cache" >&2
+            FWCTLD_CACHE=/tmp/fwctld
+        fi
+        ;;
+esac
+mkdir -p "$FWCTLD_CACHE" || exit 1
+set --
+# Network link/server readiness is handled by the daemon without blocking boot.
+FWCTLD_INTERFACE=${FWCTLD_INTERFACE-eth0}
+[ -z "$FWCTLD_INTERFACE" ] || set -- "$@" --interface "$FWCTLD_INTERFACE"
+if [ "${FWCTLD_AUTO_INSTALL:-0}" = 1 ]; then
+    if [ -z "$FWCTLD_DEVICE_ID" ] && [ -r /sys/class/net/eth0/address ]; then
+        FWCTLD_DEVICE_ID=$(device_id_from_mac) || {
+            echo "[fwctld] [ERROR] invalid eth0 MAC; set FWCTLD_DEVICE_ID" >&2
+            exit 1
+        }
+    fi
+    [ -n "$FWCTLD_DEVICE_ID" ] || { echo "[fwctld] [ERROR] set FWCTLD_DEVICE_ID" >&2; exit 1; }
+    set -- "$@" --auto-install --device "$FWCTLD_DEVICE_ID"
+fi
+FWCTLD_HWID=$(/usr/sbin/fwctl hwid value) || exit 1
+exec /usr/sbin/fwctld \
+    --server "$FWCTLD_SERVER" --cache "$FWCTLD_CACHE" \
+    --state-dir "${FWCTLD_STATE:-/data/fwctld-state}" \
+    --persistent-cache "$cache_store" --keep-cached "${FWCTLD_CACHE_KEEP:-2}" \
+    --hwid "$FWCTLD_HWID" \
+    --interval "${FWCTLD_INTERVAL:-60}" "$@"

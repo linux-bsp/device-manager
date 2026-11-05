@@ -1,0 +1,17 @@
+[Unit]
+Description=Confirm firmware after stable local health
+Requires=fw-health.service
+After=fw-health.service firmware-version.service logctl-journal.service
+OnFailure=fw-health-failure.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/device-manager/fw-confirm
+RemainAfterExit=yes
+TimeoutStartSec=150
+TimeoutStopSec=5
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -145,6 +145,22 @@ void server_route_request(int client, const struct server_context *context, stru
         } else http_text(client, 405, "Method Not Allowed", "Use GET or POST\n", false);
         return;
     }
+    if (!strcmp(method, "DELETE") && !strncmp(path, "/api/firmware/", 14)) {
+        char expected[512], id[64], extra;
+        int n = snprintf(expected, sizeof(expected), "http://%s", host ? host : "");
+        if (!admin || !host || n < 0 || (size_t)n >= sizeof(expected) ||
+            (origin && strcmp(origin, expected))) {
+            http_json(client, 403, "Forbidden", "{\"error\":\"请通过本服务管理页面操作。\"}", false);
+            return;
+        }
+        int status = !length && sscanf(path + 14, "%63[^/]%c", id, &extra) == 1 ?
+            ota_admin_delete(context->directory, id) : 400;
+        http_json(client, status, status == 200 ? "OK" : "Delete Failed",
+            status == 200 ? "{\"status\":\"deleted\"}" :
+            status == 409 ? "{\"error\":\"当前发布或正在升级的固件不能删除，或其他发布任务正在操作。\"}" :
+            "{\"error\":\"删除失败：固件不存在、参数无效或存储操作失败，请刷新检查。\"}", false);
+        return;
+    }
     if (!strcmp(method, "POST") && (!strcmp(path, "/api/upload") || !strncmp(path, "/api/publish/", 13))) {
         char expected_origin[512];
         int count = snprintf(expected_origin, sizeof(expected_origin), "http://%s", host ? host : "");

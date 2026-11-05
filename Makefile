@@ -23,6 +23,7 @@ test:
 	$(MAKE) -C transfer test
 	python3 tests/test_hwid.py
 	python3 tests/test_firmware.py
+	python3 tests/test_systemd_health.py
 	$(MAKE) -C logging test
 	$(MAKE) -C ota test
 test-storage: logctld fwctld

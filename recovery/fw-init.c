@@ -423,7 +423,7 @@ static int handoff(pthread_t thread, const char *rootfs_message)
     watchdog_fd = -1;
     log_message(rootfs_message);
     log_message("rootfs verification complete; boot health check still pending");
-    log_message("watchdog remains armed; system_manager will resume servicing after switch_root");
+    log_message("watchdog remains armed; rootfs init will resume servicing after switch_root");
     log_message("switch_root: starting verified rootfs /sbin/init");
     char *args[] = {"/bin/busybox", "switch_root", "-c", "/dev/console", "/newroot", "/sbin/init", NULL};
     execv(args[0], args); return -1;

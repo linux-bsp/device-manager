@@ -22,6 +22,7 @@
 - `firmware/`：独立固件操作引擎，不链接 EDK 库。
 - `fwctl/`：命令行工具及外设监督服务的健康检查协议适配。
 - `recovery/`：编入 `fwctl` 的 initramfs PID 1 恢复逻辑；`/init` 是调用 `fwctl init` 的脚本。
+- `integration/systemd/`：原生服务、前台启动和本地健康确认；硬件依赖及网络配置由板级 BSP 提供。
 - `logging/`：本地日志组件及集成测试。
 - `transfer/`：OTA、SOL、恢复与校时共用的 C 传输库，提供 HTTP/TFTP、流式上传、持久化续传和服务端文件传输；见 [接口与一致性约束](transfer/README.md)。
 - `config/hwid-registry.json`：产品线、项目和型号名称字典，按上级编码匹配；维护规则见 [HWID 文档](docs/hwid.md#名称字典)。
@@ -44,6 +45,8 @@ ota-cli --server http://192.168.10.246:8090 list
 ```
 
 Web 使用总览、设备、固件 OTA、远程日志 SOL 四个入口。总览和设备页汇总真实 OTA/SOL 上报；“近五分钟上报”只是活动记录，不代表设备持续在线。OTA 内部保留上传发布、升级历史、发布记录和审计标签；SOL 提供只读日志流、历史回放、阶段筛选与导出。页面资源在 `ota/web/`，构建时嵌入 host `device-server`，不依赖外部 CDN。当前调试配置的网页和设备均免凭据自动连接，不依赖 SSH。界面设计依据见 [Web 设计说明](docs/web-design.md)，配置和验收见 [SOL 与板卡验收](docs/sol.md)。 AM625 双缓冲启动缓存、服务器确认后清理及保留边界见 [双缓冲启动日志](docs/startup-buffers.md)。
+
+设备列表、升级记录、SOL 和校时选择框优先使用设备 IP 显示，MAC、hostname 与稳定内部设备标识保留在详情。历史事务使用当时记录的 IP，IP 变化不改变内部关联，也不合并相同 IP 的不同设备。缺少 IP 的历史数据回退显示内部标识。
 
 服务端将监听、HTTP 传输、OTA 路由、SOL 路由和持久化业务分层；模块接口与扩展约束见 [架构说明](docs/architecture.md)。
 
@@ -85,3 +88,7 @@ SPL/U-Boot 通过板级缓存协议交接，Linux 从 `/sys/firmware/bootlog/` �
 执行 `make -C logging test` 验证日志生命周期；`python3 tests/test_firmware.py` 验证固件引擎；`make -C ota test` 验证管理端和代理。OTA 的板级脚本测试需要相邻的 `bsp-base-external`；实际设备升级和 bootloader 接力需单独硬件验证。源码迁移出处见 [MIGRATION.md](MIGRATION.md)。
 
 侧栏“时间同步”（`/#clock`）显示服务器/设备时间和校时状态，可配置外部 NTP 或 HTTP 时间源、周期，并发起立即校时。设备支持自动校时并写入 RTC；启动归档名称和 Web 导出使用可追溯的服务器接收时间。配置和验证入口见 [设备校时与归档时间](docs/time-sync.md)。
+
+## 固件删除
+
+Web 固件列表末列提供“删除”。当前发布和升级进行中的固件受保护；删除会移除相同内容的重复上传，但保留历史发布快照、回退文件和设备升级审计。删除操作记录在服务端 SQLite `firmware_deletions` 表。

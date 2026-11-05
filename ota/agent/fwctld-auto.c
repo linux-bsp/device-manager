@@ -345,7 +345,7 @@ int fwctld_auto_reconcile(const char *server, const char *device, const char *hw
             return flush_reports(server) ? 1 : 0;
         }
         if (strcmp(r.phase, "boot-testing") && report(server, &r, "boot-testing", s.version[s.booted])) return -1;
-        return 1; /* S99fw-mark-good and the existing watchdog own health policy. */
+        return 1; /* The boot confirmation service and watchdog own health policy. */
     }
     if (!strcmp(boot, r.boot) && s.pending == r.target &&
         s.version[r.target] == r.version && !strcmp(s.identity[r.target], expected_id) &&
