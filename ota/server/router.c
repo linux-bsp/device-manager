@@ -69,42 +69,30 @@ static void upload(int client, unsigned long long length, const struct server_co
     http_json(client, 201, "Created", json, false);
 }
 
-void server_route_client(int client, const struct server_context *context)
+void server_route_request(int client, const struct server_context *context, struct http_request *request)
 {
-    struct http_request request;
-    int status = http_read_request(client, &request);
-    if (status < 0)
-        return;
-    if (status == 431) {
-        http_text(client, 431, "Request Header Fields Too Large", "Headers too large\n", false);
-        return;
-    }
-    if (status == 400) {
-        http_text(client, 400, "Bad Request", "Invalid request\n", false);
-        return;
-    }
-    char *method = request.method;
-    char *path = request.path;
-    bool head = request.head;
-    unsigned long long length = request.length;
-    bool has_length = request.has_length, admin = request.admin, expect = request.expect;
-    const char *origin = request.origin, *host = request.host, *type = request.type;
-    const char *download_device = request.device;
-    const char *requested_range = request.range;
+    char *method = request->method;
+    char *path = request->path;
+    bool head = request->head;
+    unsigned long long length = request->length;
+    bool has_length = request->has_length, admin = request->admin, expect = request->expect;
+    const char *origin = request->origin, *host = request->host, *type = request->type;
+    const char *download_device = request->device;
+    const char *requested_range = request->range;
     struct ota_network_context network = {
-        .ip = request.ip, .mac = request.mac, .hostname = request.hostname, .boot = request.boot, .hwid = request.hwid
+        .ip = request->ip, .mac = request->mac, .hostname = request->hostname, .boot = request->boot, .hwid = request->hwid
     };
-    memcpy(network.peer_ip, request.peer_ip, sizeof(network.peer_ip));
+    memcpy(network.peer_ip, request->peer_ip, sizeof(network.peer_ip));
     int root = context->root;
-    if ((request.hwid && !ota_hwid_valid(request.hwid)) || (download_device && !ota_identifier(download_device)) ||
+    if ((request->hwid && !ota_hwid_valid(request->hwid)) || (download_device && !ota_identifier(download_device)) ||
         ((network.ip || network.mac || network.hostname || network.boot) &&
          (!download_device || !ota_network_valid(&network)))) {
         http_json(client, 400, "Bad Request", "{\"error\":\"Invalid request headers\"}", head);
         return;
     }
-    if (manager_time_route(client, context, &request))
+    if (manager_time_route(client, context, request))
         return;
-    if (sol_route_client(client, context, &request))
+    if (sol_route_client(client, context, request))
         return;
     if (!strncmp(path, "/api/policy/", 12)) {
         char device[64], extra, canonical[128], body[128]; unsigned long long publication;
@@ -116,8 +104,8 @@ void server_route_client(int client, const struct server_context *context)
         snprintf(canonical, sizeof(canonical), "/api/policy/%s/%llu", device, publication);
         if (strcmp(path, canonical)) { http_text(client, 400, "Bad Request", "Invalid policy query\n", head); return; }
         struct ota_report target = {.publication = publication};
-        if (!request.hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
-        strcpy(target.hwid, request.hwid);
+        if (!request->hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
+        strcpy(target.hwid, request->hwid);
         if (!ota_report_targets(context->directory, &target)) {
             http_text(client, 403, "Forbidden", "Publication targets another HWID\n", head); return;
         }
@@ -136,8 +124,8 @@ void server_route_client(int client, const struct server_context *context)
             http_text(client, 400, "Bad Request", "Invalid device ID\n", head);
         } else if (!strcmp(method, "GET") || head) {
             int rc = ota_device_read(context->directory, id, body);
-            if (!request.hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
-            if (!rc) { struct ota_report previous; if (!ota_report_parse(body, &previous) && strcmp(previous.hwid, request.hwid)) rc = 1; }
+            if (!request->hwid) { http_text(client, 403, "Forbidden", "Device HWID required\n", head); return; }
+            if (!rc) { struct ota_report previous; if (!ota_report_parse(body, &previous) && strcmp(previous.hwid, request->hwid)) rc = 1; }
             if(!rc){
                 struct ota_report report;
                 if(!ota_report_parse(body,&report)&&ota_report_incident(&report)&&sol_ota_event(context->directory,&report,NULL))
@@ -156,7 +144,7 @@ void server_route_client(int client, const struct server_context *context)
             body[length] = 0;
             struct ota_report report;
             if (memchr(body, 0, (size_t)length) || ota_report_parse(body, &report) || strcmp(report.device, id) ||
-                (download_device && strcmp(download_device, id)) || !request.hwid || strcmp(report.hwid, request.hwid))
+                (download_device && strcmp(download_device, id)) || !request->hwid || strcmp(report.hwid, request->hwid))
                 http_text(client, 400, "Bad Request", "Invalid report\n", false);
             else if (!ota_report_targets(context->directory, &report))
                 http_text(client, 403, "Forbidden", "Publication targets another HWID\n", false);
@@ -164,7 +152,7 @@ void server_route_client(int client, const struct server_context *context)
                      ota_device_write(context->directory, &report))
                 http_text(client, 500, "Write Failed", "Report not saved\n", false);
             else {
-                if(sol_ota_event(context->directory,&report,request.boot))
+                if(sol_ota_event(context->directory,&report,request->boot))
                     fprintf(stderr,"[device-server] [ERROR] Cannot archive OTA log evidence for %s/%llu; upgrade result remains recorded\n",report.device,report.publication);
                 http_text(client, 200, "OK", "ok\n", false);
             }
@@ -275,13 +263,13 @@ void server_route_client(int client, const struct server_context *context)
             return;
         }
         const char *number = strrchr(directory, '/');
-        snprintf(path, sizeof(request.path), "/releases/%s/%s", number + 1, filename);
+        snprintf(path, sizeof(request->path), "/releases/%s/%s", number + 1, filename);
     }
     int artifact_root = -1;
     const char *name = NULL;
     if (!strncmp(path, "/latest/", 8)) {
         const char *hwid = path + 8;
-        if (!ota_hwid_valid(hwid) || !request.hwid || strcmp(hwid, request.hwid)) {
+        if (!ota_hwid_valid(hwid) || !request->hwid || strcmp(hwid, request->hwid)) {
             http_text(client, 403, "Forbidden", "Exact device HWID required\n", head); return;
         }
         struct release latest;
@@ -296,7 +284,7 @@ void server_route_client(int client, const struct server_context *context)
         if (!head && network.ip && ota_catalog_request(context->directory, download_device, latest.version, network.boot, "requested", &network)) {
             http_text(client, 503, "Unavailable", "Cannot persist device request audit\n", head); return;
         }
-        snprintf(path, sizeof(request.path), "/releases/%llu/manifest", latest.version);
+        snprintf(path, sizeof(request->path), "/releases/%llu/manifest", latest.version);
         name = "manifest";
         int releases = openat(root, "releases", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         char number[32]; snprintf(number, sizeof(number), "%llu", latest.version);
@@ -333,7 +321,7 @@ void server_route_client(int client, const struct server_context *context)
     if (name && artifact_root >= 0) {
         char relative[64], directory[OTA_PATH], manifest[OTA_PATH]; struct release release;
         unsigned long long publication;
-        const char *hwid = recovery_hwid[0] ? recovery_hwid : request.hwid;
+        const char *hwid = recovery_hwid[0] ? recovery_hwid : request->hwid;
         if (sscanf(path, "/releases/%llu/", &publication) != 1) { close(artifact_root); return; }
         snprintf(relative, sizeof(relative), "releases/%llu", publication);
         if (!ota_hwid_valid(hwid) || ota_path(directory, context->directory, relative) || ota_path(manifest, directory, "manifest") ||

@@ -15,6 +15,13 @@ struct dm_transfer_http_request {
 };
 /* 0 success; HTTP parse status 400/431; negative errno for transport errors. */
 int dm_transfer_http_read(int socket,struct dm_transfer_http_request *request);
+/* One nonblocking, <=2048-byte step, without consuming any body bytes.
+ * 1 complete, 0 pending, 400/431 invalid header, negative errno on I/O.
+ * Caller owns the total deadline and initializes used=0. */
+int dm_transfer_http_header_step(int socket, char *header, size_t capacity, size_t *used);
+/* Parse one exact header block (including CRLFCRLF); data must not overlap request. */
+int dm_transfer_http_parse(int socket, struct dm_transfer_http_request *request,
+                            const char *header, size_t length);
 /* 0 found, 1 absent, -EPROTO ambiguous. Values live with the request. */
 int dm_transfer_http_header(const struct dm_transfer_http_request *request,const char *name,const char **value);
 int dm_transfer_send_all(int socket,const void *data,size_t length);

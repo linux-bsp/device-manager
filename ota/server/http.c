@@ -45,11 +45,9 @@ void http_json(int client, int status, const char *reason,
         (void)http_send_all(client, body, length);
 }
 
-int http_read_request(int client, struct http_request *request)
+static int request_fields(struct http_request *request)
 {
-    memset(request, 0, sizeof(*request));
-    int rc = dm_transfer_http_read(client, &request->transport);
-    if (rc) return rc < 0 ? -1 : rc;
+    int rc;
     struct dm_transfer_http_request *r = &request->transport;
     memcpy(request->method, r->method, sizeof(request->method));
     memcpy(request->path, r->path, sizeof(request->path));
@@ -71,4 +69,18 @@ int http_read_request(int client, struct http_request *request)
     if (rc < 0 || (!rc && strcmp(admin, "1"))) return 400;
     request->admin = !rc;
     return 0;
+}
+
+int http_read_request(int client, struct http_request *request)
+{
+    memset(request, 0, sizeof(*request));
+    int rc = dm_transfer_http_read(client, &request->transport);
+    return rc ? rc : request_fields(request);
+}
+
+int http_parse_request(int client, struct http_request *request, const char *header, size_t length)
+{
+    memset(request, 0, sizeof(*request));
+    int rc = dm_transfer_http_parse(client, &request->transport, header, length);
+    return rc ? rc : request_fields(request);
 }

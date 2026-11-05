@@ -9,6 +9,7 @@ struct server_context {
     const volatile sig_atomic_t *running;
 };
 
-void server_route_client(int client, const struct server_context *context);
+struct http_request;
+void server_route_request(int client, const struct server_context *context, struct http_request *request);
 
 #endif

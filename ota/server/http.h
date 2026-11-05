@@ -21,6 +21,7 @@ struct http_request {
 
 /* Returns 0, 400, 431, or -1 for a closed connection. */
 int http_read_request(int client, struct http_request *request);
+int http_parse_request(int client, struct http_request *request, const char *header, size_t length);
 int http_send_all(int client, const void *data, size_t length);
 int http_headers(int client, int status, const char *reason,
                  const char *type, uintmax_t length);

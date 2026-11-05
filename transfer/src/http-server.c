@@ -103,22 +103,56 @@ int dm_transfer_http_header(const struct dm_transfer_http_request *r,const char 
     }
     return found?0:1;
 }
-int dm_transfer_http_read(int fd,struct dm_transfer_http_request *r)
+int dm_transfer_http_header_step(int fd, char *header, size_t capacity, size_t *used)
+{
+    if (!header || !used || capacity < 5 || *used >= capacity) return -EINVAL;
+    if (*used == capacity - 1) return 431;
+    size_t budget = capacity - 1 - *used;
+    if (budget > 2048) budget = 2048;
+    ssize_t peeked = recv(fd, header + *used, budget, MSG_PEEK | MSG_DONTWAIT);
+    if (peeked < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 0;
+    if (peeked <= 0) return peeked < 0 ? -errno : -ECONNRESET;
+    size_t end = 0, available = *used + (size_t)peeked;
+    for (size_t i = *used > 3 ? *used - 3 : 0; i + 4 <= available; i++) {
+        if (!memcmp(header + i, "\r\n\r\n", 4)) { end = i + 4; break; }
+    }
+    size_t take = end ? end - *used : (size_t)peeked;
+    if (memchr(header + *used, 0, take)) return 400;
+    ssize_t got = recv(fd, header + *used, take, MSG_DONTWAIT);
+    if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 0;
+    if (got <= 0) return got < 0 ? -errno : -ECONNRESET;
+    *used += (size_t)got;
+    header[*used] = 0;
+    if (end && *used == end) return 1;
+    return *used == capacity - 1 ? 431 : 0;
+}
+
+int dm_transfer_http_read(int fd, struct dm_transfer_http_request *r)
+{
+    char header[sizeof(r->storage)]; size_t used = 0;
+    memset(r, 0, sizeof(*r));
+    int64_t start = monotonic_ms(); if (start < 0) return -EIO;
+    for (;;) {
+        int rc = wait_read(fd, start + 15000, NULL);
+        if (rc) return rc;
+        rc = dm_transfer_http_header_step(fd, header, sizeof(header), &used);
+        if (rc == 1) return dm_transfer_http_parse(fd, r, header, used);
+        if (rc) return rc;
+    }
+}
+
+int dm_transfer_http_parse(int fd, struct dm_transfer_http_request *r,
+                            const char *header, size_t length)
 {
     memset(r,0,sizeof(*r));strcpy(r->peer_ip,"unknown");
+    if (length >= sizeof(r->storage)) return 431;
+    if (!header || length < 4 || memchr(header, 0, length) ||
+        memcmp(header + length - 4, "\r\n\r\n", 4)) return 400;
+    memcpy(r->storage, header, length); r->storage[length] = 0;
+    if (strstr(r->storage, "\r\n\r\n") != r->storage + length - 4) return 400;
     struct timeval timeout={.tv_sec=15};
     (void)setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
     (void)setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
-    int64_t start=monotonic_ms();if(start<0)return -EIO;
-    size_t used=0;int complete=0;
-    while(used<sizeof(r->storage)-1){
-        int64_t now=monotonic_ms();if(now<0||now-start>=15000)return -ETIMEDOUT;
-        int rc=dm_transfer_receive_exact(fd,r->storage+used,1,15000-(long)(now-start),NULL);if(rc)return rc;
-        if(!r->storage[used])return 400;
-        used++;r->storage[used]=0;
-        if(used>=4&&!memcmp(r->storage+used-4,"\r\n\r\n",4)){complete=1;break;}
-    }
-    if(!complete)return 431;
     char extra,*line=strstr(r->storage,"\r\n");if(!line)return 400;
     *line=0;
     if(sscanf(r->storage,"%15s %2047s %15s %c",r->method,r->path,r->protocol,&extra)!=3||

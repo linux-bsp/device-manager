@@ -4,6 +4,7 @@
 #include "sol.h"
 #include "ota-device.h"
 #include "router.h"
+#include "admission.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -129,19 +130,10 @@ int main(int argc, char **argv)
     (void)getsockname(listener, (struct sockaddr *)&address, &size);
     printf("Device Manager: http://%s:%u/ root=%s\n", bind_address, ntohs(address.sin_port), directory);
     fflush(stdout);
-    while (running) {
-        int client = accept(listener, NULL, NULL);
-        if (client < 0) {
-            if (errno == EINTR)
-                continue;
-            perror("accept");
-            break;
-        }
-        struct server_context context = {.directory = directory, .root = root, .running = &running};
-        server_route_client(client, &context);
-        close(client);
-    }
+    struct server_context context = {.directory = directory, .root = root, .running = &running};
+    int rc = server_accept_loop(listener, &context);
+    if (rc) fprintf(stderr, "[device-server] [ERROR] listener failed: %s\n", strerror(-rc));
     close(listener);
     close(root);
-    return 0;
+    return rc ? 1 : 0;
 }
