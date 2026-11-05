@@ -3,6 +3,7 @@
 #include "sol-forward.h"
 #include "retention.h"
 #include "archive.h"
+#include "boot-record.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -416,7 +417,12 @@ static int daemon_main(int argc,char **argv)
     event("log collector started; monotonic/wall timestamps are receive times; kernel records retain native timestamps");
     if(kmsg<0)event("kernel source unavailable: /dev/kmsg");
     join(p,bootpath,"imported");if(access(p,F_OK)){import_early();save_text(p,"1\n");}
-    pstore_archive();prune();
+    pstore_archive();
+    const char *previous=NULL;
+    for(size_t i=0;i<count;i++)if(strcmp(list[i].name,current)){previous=list[i].name;break;}
+    int boot_rc=log_boot_start(root,current,previous);
+    if(boot_rc)fprintf(stderr,"[logctld] [WARN] boot evidence unavailable: %s; collection continues\n",strerror(-boot_rc));
+    prune();
     (void)verify_storage();
     pid_t forwarder=-1;
     const char *sol_config=getenv("LOGCTL_SOL_CONFIG");
@@ -478,6 +484,11 @@ static int show_file(const char *path)
 }
 static int cli_main(int argc,char **argv)
 {
+    if(argc==3&&!strcmp(argv[1],"boot-event")){
+        int rc=log_boot_event(root,current,argv[2]);
+        if(rc)fprintf(stderr,"[logctl] [WARN] boot evidence not recorded: %s\n",strerror(-rc));
+        return rc?1:0;
+    }
     if(argc==2&&!strcmp(argv[1],"sync-time"))return sol_sync_time();
     if(argc==4&&!strcmp(argv[1],"forward")&&!strcmp(argv[2],"--root")&&argv[3][0]=='/')return sol_forward(argv[3]);
     if(argc>=4&&!strcmp(argv[1],"run"))return run_command(argv[2],argv+3);
@@ -513,6 +524,11 @@ static int cli_main(int argc,char **argv)
     }
     if(!strcmp(boot,"previous")){boot=NULL;for(size_t i=0;i<n;i++)if(strcmp(list[i].name,current)){boot=list[i].name;break;}if(!boot){fprintf(stderr,"No previous boot available\n");return 1;}}
     if(!safe_name(boot)||(stage&&stage_id(stage)<0))goto usage;
+    if((!strcmp(argv[1],"boot-state")||!strcmp(argv[1],"boot-events"))&&!stage&&!output){
+        int rc=!strcmp(argv[1],"boot-state")?log_boot_show(root,boot):log_boot_history(root,boot);
+        if(rc)fprintf(stderr,"[logctl] [WARN] boot evidence unavailable: %s\n",strerror(-rc));
+        return rc?1:0;
+    }
     char path[PATH_CAP];join(path,root,boot);struct stat st;if(lstat(path,&st)||!S_ISDIR(st.st_mode))return 1;
     if(!strcmp(argv[1],"show")){
         for(int i=0;i<STREAMS;i++)if(!stage||!strcmp(stage,stages[i]))for(int j=1;j>=0;j--){
@@ -542,7 +558,9 @@ static int cli_main(int argc,char **argv)
         return rc?1:0;
     }
 usage:
-    fprintf(stderr,"Usage: logctl sync-time | verify-storage | verify-boot\n"
+    fprintf(stderr,"Usage: logctl boot-state | boot-events [--boot ID|previous]\n"
+        "       logctl boot-event {health-confirmed|ota-update|health-rejected|operator|shutdown|cancel-intent}\n"
+        "       logctl sync-time | verify-storage | verify-boot\n"
         "       logctl status | boots | losses | show [--boot ID|previous] [--stage STAGE]\n"
         "       logctl follow [--boot ID|previous] [--stage STAGE]\n"
         "       logctl export [--boot ID|previous] --output /path/logs.tar.gz\n"

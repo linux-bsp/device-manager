@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "fwctld-auto.h"
+#include "fwctld-boot.h"
 #include "ota-device.h"
 #include "fwctld-log.h"
 #include "fwctld-network.h"
@@ -286,9 +287,13 @@ static int reboot_device(const char *server, struct ota_report *r, const struct 
     if (report(server, r, "rebooting", s->version[s->booted])) return -1;
     if (ota_stop) return 1;
     fwctld_log("Installation verified; rebooting now. Success requires health confirmation after boot.");
+    if (fwctld_boot_event("ota-update"))
+        fwctld_error("Reboot intent could not be recorded; firmware transaction remains durable");
+    if (ota_stop) return 1;
     sync();
     char *args[] = {"reboot", NULL};
     if (ota_run(args, NULL, 0)) {
+        (void)fwctld_boot_event("cancel-intent");
         (void)report(server, r, "reboot-failed", s->version[s->booted]);
         return -1;
     }

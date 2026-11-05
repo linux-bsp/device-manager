@@ -51,3 +51,6 @@ flowchart TB
 闭合启动日志由 `logging/archive.c` 生成有界包与持久收据，`bundle-forward.c` 调度单包续传，
 `ota/server/sol-bundle.c` 管理完整性确认和有限归档目录；公共 `transfer` 库提供游标推送、
 SHA256、文件收发，不决定保留策略。实时日志、早期双缓冲快照和闭合整包的生命周期分别管理。
+
+`logging/boot-record.c` 记录启动事件、CRC/序列和软件重启意图，不决定硬件复位原因或
+固件状态迁移。fwctld 的可选日志调用有独立截止时间，证据不可用不覆盖已提交的升级事务。

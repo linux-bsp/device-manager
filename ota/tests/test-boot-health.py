@@ -33,6 +33,9 @@ esac
 ''');fw.chmod(0o755)
         text=SOURCE.read_text().replace('/usr/sbin/fwctl',str(fw)).replace('interval=5','interval=0').replace('/run/fwctl-boot-confirmed',str(self.marker)).replace('/run/rcS.critical',str(self.base/'failed')).replace('/var/run/fw-mark-good.pid',str(self.base/'pid'))
         text=text.replace('/run/fwctl-health.last',str(self.base/'health-last')).replace('\tsync\n','\t:\n').replace('\treboot\n','\techo reboot >> "$CALLS"\n')
+        log=self.base/'logctl'
+        log.write_text('#!/bin/sh\nprintf "boot-event:%s\\n" "$2" >> "$CALLS"\nexit "${LOG_EVENT_EXIT:-0}"\n');log.chmod(0o755)
+        text=text.replace('/usr/sbin/logctl',str(log))
         self.script=self.base/'init';self.script.write_text(text)
     def tearDown(self):self.tmp.cleanup()
     def run_worker(self,**values):
@@ -42,6 +45,7 @@ esac
         p=self.run_worker();self.assertEqual(p.returncode,0,p.stderr)
         self.assertEqual(self.marker.read_text(),'1\n');self.assertEqual(self.calls.read_text().count('health-check'),6)
         self.assertIn('mark-good',self.calls.read_text())
+        self.assertIn('boot-event:health-confirmed',self.calls.read_text())
     def test_previously_confirmed_still_requires_this_boot_health(self):
         p=self.run_worker(CONFIRMED='1');self.assertEqual(p.returncode,0,p.stderr)
         self.assertEqual(self.marker.read_text(),'1\n');self.assertEqual(self.calls.read_text().count('health-check'),6)
@@ -65,4 +69,9 @@ esac
     def test_confirmed_system_failure_does_not_reboot_automatically(self):
         self.run_worker(HEALTH_EXIT='1',CONFIRMED='1')
         self.assertNotIn('reboot',self.calls.read_text());self.assertNotIn('mark-bad',self.calls.read_text())
+    def test_evidence_failure_does_not_reject_healthy_firmware(self):
+        p=self.run_worker(LOG_EVENT_EXIT='1')
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertTrue(self.marker.exists())
+        self.assertIn('boot event could not be persisted',p.stderr)
 if __name__=='__main__':unittest.main()

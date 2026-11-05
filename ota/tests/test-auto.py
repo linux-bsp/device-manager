@@ -145,6 +145,33 @@ class AutomaticOTA(unittest.TestCase):
         self.unexpected_download=self.root/'unexpected-download'
         self.proxy.add(self.root/'reject-payload',suffix='.itb',seen=self.unexpected_download,drop=True)
 
+    def test_boot_intent_is_recorded_before_reboot(self):
+        log=self.bin/'logctl'
+        log.write_text('#!/bin/sh\nprintf "intent:%s\\n" "$2" >> "$TEST_CALLS"\n')
+        log.chmod(0o755)
+        self.agent()
+        self.assertEqual(self.calls.read_text(),'install\nintent:ota-update\nreboot\n')
+
+    def test_failed_reboot_cancels_software_intent(self):
+        log=self.bin/'logctl'
+        log.write_text('#!/bin/sh\nprintf "intent:%s\\n" "$2" >> "$TEST_CALLS"\n');log.chmod(0o755)
+        (self.bin/'reboot').write_text('#!/bin/sh\necho reboot-failed >> "$TEST_CALLS"\nexit 1\n')
+        self.agent(ok=False)
+        self.assertEqual(self.calls.read_text(),'install\nintent:ota-update\nreboot-failed\nintent:cancel-intent\n')
+        self.assertEqual(self.phase(),'reboot-failed')
+
+    def test_stuck_boot_intent_does_not_block_committed_reboot(self):
+        log=self.bin/'logctl';pid=self.root/'intent.pid'
+        log.write_text(f'#!/bin/sh\necho $$ > {pid}\nexec sleep 60\n');log.chmod(0o755)
+        started=time.monotonic();result=self.agent()
+        self.assertLess(time.monotonic()-started,6)
+        self.assertEqual(self.calls.read_text(),'install\nreboot\n')
+        self.assertIn('intent could not be recorded',result.stdout)
+        for _ in range(50):
+            if not (Path('/proc')/pid.read_text().strip()).exists():break
+            time.sleep(.02)
+        self.assertFalse((Path('/proc')/pid.read_text().strip()).exists())
+
     def test_auto_success_waits_for_confirmation(self):
         self.agent()
         self.assertEqual(self.calls.read_text(), 'install\nreboot\n')

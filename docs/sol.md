@@ -180,3 +180,9 @@ SOL 页面增加“下载完整日志包”；实时窗口已淘汰但整包尚�
 
 测试：`python3 ota/tests/test-sol-bundle.py` 覆盖中断续传、重启、损坏校验、目录/身份拒绝、
 容量、超时、删除、实际转发器以及确认优先淘汰。用户态进程重启测试不替代真实掉电测试。
+
+## 启动事件与重启意图
+
+`logctl boot-state` 和 `logctl boot-events --boot previous` 查看带 CRC 的启动记录。
+SOL 元数据和完整日志包同步携带这些证据。软件意图与 U-Boot 观察标签分别保存，
+缺少原始硬件证据时实际复位原因仍为 unknown；详见 [启动证据](boot-evidence.md)。

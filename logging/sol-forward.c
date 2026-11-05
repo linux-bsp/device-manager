@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "sol-forward.h"
 #include "bundle-forward.h"
+#include "boot-record.h"
 #include "startup-forward.h"
 #include "time-sync.h"
 #include "time-control.h"
@@ -151,6 +152,11 @@ static int cycle(const char *root)
         snprintf(p,sizeof(p),"%.800s/%.63s/storage-check",root,boots[b].name);
         char marker[64];
         k+=snprintf(meta+k,sizeof(meta)-(size_t)k,"durable-marker=%s\n",!read_text(p,marker,sizeof(marker))&&!strcmp(marker,boots[b].name)?"synced":"unavailable");
+        char boot_meta[512];
+        if(!log_boot_metadata(root,boots[b].name,boot_meta,sizeof(boot_meta))){
+            if((size_t)k+strlen(boot_meta)>=sizeof(meta))return -1;
+            strcpy(meta+k,boot_meta);
+        }
         long long next;
         if(post(boots[b].name,boots[b].order,"meta",0,0,meta,strlen(meta),&next))return -1;
         for(size_t i=0;i<sizeof(stages)/sizeof(*stages);i++)for(int rotated=1;rotated>=0;rotated--){
