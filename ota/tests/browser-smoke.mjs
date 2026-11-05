@@ -113,7 +113,7 @@ try {
     assert((await (await fetch(url+'/api/state')).json()).drafts.some(d=>d.id===draft.id),'Cancel preserves upload');
     await evaluate('window.confirm=()=>true');
     await evaluate(`document.querySelector('[data-delete="${draft.id}"]').click()`);
-    await until(()=>evaluate("document.querySelector('#notice').textContent.includes('固件已删除') && document.querySelectorAll('#drafts tr').length===0"),'Delete firmware row');
+    await until(()=>evaluate("document.querySelector('#notice').textContent.includes('仅保留审计记录') && document.querySelectorAll('#drafts tr').length===0"),'Delete firmware row');
     const replacement=await fetch(url+'/api/upload',{method:'POST',headers:{'X-OTA-Request':'1','Content-Type':'application/octet-stream'},body:await readFile(bundle)});
     assert.equal(replacement.status,201);const replacementId=(await replacement.json()).id;
     draft=(await (await fetch(url+'/api/state')).json()).drafts.find(d=>d.id===replacementId);

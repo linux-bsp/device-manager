@@ -18,7 +18,7 @@ struct download {
     pid_t pid;
     int count, cancelled;
     unsigned long long publication;
-    char root[OTA_PATH], device[64], kernel_hash[65], rootfs_hash[65];
+    char root[OTA_PATH], directory[OTA_PATH], device[64], kernel_hash[65], rootfs_hash[65];
 };
 static struct download workers[DOWNLOAD_WORKERS];
 
@@ -34,6 +34,9 @@ void server_downloads_poll(void)
     for (int i = 0; i < DOWNLOAD_WORKERS; i++) {
         struct download *job = &workers[i];
         if (!job->pid) continue;
+        if(!job->cancelled && job->directory[0] && ota_catalog_removed(job->root,job->directory,NULL)) {
+            job->cancelled=1;(void)kill(job->pid,SIGTERM);
+        }
         int status;
         pid_t result = waitpid(job->pid, &status, WNOHANG);
         if (result == job->pid) {
@@ -53,10 +56,18 @@ void server_downloads_poll(void)
 
 void server_download(const struct dm_transfer_serve *serve, const char *root,
                       unsigned long long publication, const char *device, int count_download,
-                      int *response_deferred)
+                      int *response_deferred, const char *artifact_directory)
 {
     server_downloads_poll();
     struct download job = {.publication=publication, .count=count_download && !serve->head};
+    if(artifact_directory)snprintf(job.directory,sizeof(job.directory),"%s",artifact_directory);
+    else if(publication){
+        char relative[64];snprintf(relative,sizeof(relative),"releases/%llu",publication);
+        if(!root || ota_path(job.directory,root,relative))return;
+    }
+    if(job.directory[0] && (!root || ota_catalog_removed(root,job.directory,NULL))){
+        http_text(serve->socket,410,"Gone","Firmware package deleted\n",serve->head);return;
+    }
     if ((root && snprintf(job.root, sizeof(job.root), "%s", root) >= (int)sizeof(job.root)) ||
         (device && snprintf(job.device, sizeof(job.device), "%s", device) >= (int)sizeof(job.device))) {
         http_text(serve->socket, 503, "Unavailable", "Download context unavailable\n", serve->head); return;

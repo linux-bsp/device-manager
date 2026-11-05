@@ -116,7 +116,14 @@ int ota_quarantine_report(const char *root, const struct ota_report *report)
     if (access(manifest, F_OK)) return errno == ENOENT ? 0 : -1;
     if (ota_read(manifest, &release) || strcmp(release.hwid, report->hwid)) return -1;
     unsigned long version;
-    if (ota_fit_version(directory, &version) || version != report->version || identity_key(directory, key, e.kernel, e.rootfs)) return -1;
+    int removed=ota_catalog_removed(root,directory,NULL);
+    if(removed<0)return -1;
+    if(removed){
+        struct ota_catalog_identity identity;
+        if(ota_catalog_recorded(root,directory,&identity)||identity.version!=report->version)return -1;
+        strcpy(e.kernel,identity.kernel);strcpy(e.rootfs,identity.rootfs);
+        snprintf(key,sizeof(key),"%s-%s",e.kernel,e.rootfs);
+    }else if (ota_fit_version(directory, &version) || version != report->version || identity_key(directory, key, e.kernel, e.rootfs)) return -1;
     int lock = ota_lock(root); if (lock < 0) return -1;
     int rc = -1; DIR *channels = NULL;
     if (ota_path(base, root, "quarantine") || ota_mkdir(base) || ota_sync_dir(root)) goto done;

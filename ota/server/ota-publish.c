@@ -102,6 +102,7 @@ int ota_publish(int argc, char **argv)
     if (!batch) return 1;
     int lock = ota_lock(root);
     if (lock < 0) { free(batch); fprintf(stderr, "Another publisher is active or lock unavailable\n"); return 1; }
+    if(ota_catalog_removed(root,source,NULL)){close(lock);free(batch);return 1;}
     int rc = 1;
     char temp[OTA_PATH] = "", target[OTA_PATH], first[OTA_PATH] = "", name[64], from[OTA_PATH], to[OTA_PATH];
     for (size_t i = 0; i < count; i++) {

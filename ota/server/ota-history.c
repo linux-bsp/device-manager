@@ -206,6 +206,7 @@ static int find_good(const struct history *h, void *context)
     char directory[OTA_PATH], relative[64];
     snprintf(relative, sizeof(relative), "releases/%llu", r->publication);
     if (ota_path(directory, q->root, relative)) return -1;
+    if (ota_catalog_removed(q->root,directory,NULL)) return 0;
     struct release release; unsigned long version;
     if (!ota_inspect(directory, &release, &version) &&
         !ota_quarantine_blocked(q->root, directory)) q->best = r->publication;

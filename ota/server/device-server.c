@@ -90,8 +90,9 @@ int main(int argc, char **argv)
         perror(directory);
         return 1;
     }
-    const char *history_step = "seed";
-    int history_status = ota_history_seed(directory);
+    const char *history_step = "firmware deletion cleanup";
+    int history_status = ota_admin_cleanup(directory);
+    if(!history_status){history_step="seed";history_status=ota_history_seed(directory);}
     if (!history_status) {
         history_step = "incident replay";
         history_status = ota_history_incidents(directory);

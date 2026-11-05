@@ -9,16 +9,16 @@ function cell(row,text){const td=document.createElement('td');td.textContent=tex
 function detailLink(item,tab=activeTab()){const a=document.createElement('a');a.textContent='查看详情';a.href='/firmware?kind='+((item.id||'').startsWith('draft-')?'draft':'release')+'&id='+encodeURIComponent(item.id)+'&tab='+tab;return a;}
 function deleteFirmwareButton(item){
  const b=document.createElement('button');b.type='button';b.className='delete-firmware';b.textContent='删除';
- if(item.published||!item.id.startsWith('draft-')){b.disabled=true;b.title='当前发布版本不能删除';return b;}
- b.dataset.delete=item.id;
+ if(item.published||item.deleted){b.disabled=true;b.title=item.deleted?'固件包已删除，仅保留审计记录':'当前发布版本不能删除';return b;}
+ const id=item.id.startsWith('draft-')?item.id:'release-'+item.id;b.dataset.delete=id;
  b.onclick=async()=>{
   if(busy||refreshing)return;
-  if(!window.confirm(`删除固件 ${item.tag||item.firmware_version} / ${(item.firmware_id||'').slice(0,8)}？\n相同内容的重复上传一并移除。历史发布副本和升级记录会保留。`))return;
+  if(!window.confirm(`彻底删除固件 ${item.tag||item.firmware_version} / ${(item.firmware_id||'').slice(0,8)}？\n将删除全部上传包和历史发布副本，仅保留审计记录。删除后无法下载或用于回退。`))return;
   busy=true;controls();
   try{
-   const r=await fetch('/api/firmware/'+encodeURIComponent(item.id),{method:'DELETE',headers:{'X-OTA-Request':'1'}});
+   const r=await fetch('/api/firmware/'+encodeURIComponent(id),{method:'DELETE',headers:{'X-OTA-Request':'1'}});
    const result=await r.json();if(!r.ok)throw new Error(result.error||'删除失败');
-   notice('固件已删除，历史发布和升级记录已保留。');await state();
+   notice('固件包及全部历史发布副本已删除，仅保留审计记录。');await state();
   }catch(e){notice(e.message,true);}finally{busy=false;controls();}
  };return b;
 }
@@ -69,7 +69,7 @@ async function loadState(){
    publicationControls(action,d,data);
    cell(row,'').append(detailLink(d,tbody==='drafts'?'manage':'releases'));
    if(tbody==='drafts')cell(row,'').append(deleteFirmwareButton(d));
-   searchable(row,{...d,status:!d.valid?'无效':d.published?'已发布':'未发布',created_text:when(d.created)});$(tbody).append(row);
+   searchable(row,{...d,status:d.deleted?'固件包已删除':!d.valid?'无效':d.published?'已发布':'未发布',created_text:when(d.created)});$(tbody).append(row);
   }
  }
  for(const d of [...(data.device_history||[])].sort((a,b)=>b.updated-a.updated||b.publication-a.publication)){
@@ -142,7 +142,7 @@ function renderDetails(data){
  const title=document.createElement('h1');title.textContent='固件详情';pane.append(title);
  if(!item){const message=document.createElement('p');message.textContent='未找到该固件。';pane.append(message);return;}
  document.title=(item.tag||item.firmware_version)+' · 固件详情';
- pane.append(downloadLink(item));
+ if(!item.deleted)pane.append(downloadLink(item));
  const publications=data.releases.filter(x=>x.firmware_id===item.firmware_id);
  const ids=new Set(publications.map(x=>x.publication));
  const history=(data.device_history||[]).filter(x=>ids.has(x.publication));
@@ -156,7 +156,7 @@ function renderDetails(data){
  const rows=[['上传时间',uploadTime(item)],
  ['版本号',item.tag||item.firmware_version],['内容哈希',item.firmware_id],['产品信息',FirmwareHardware.product(item.hwid||item.hwids?.[0])],
  ['固件大小',size(item.bytes)],['发布状态',active.length?'当前 HWID 通道：'+active.join('、'):'未发布'],
- ['是否有效',item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],
+ ['是否有效',item.deleted?'固件包已删除，仅保留审计记录':item.valid?'有效（上传校验通过，未被隔离）':'无效（已隔离，禁止发布）'],
  ['设备下载次数',String(sum('identified_downloads'))],['未识别设备的下载次数',String(sum('downloads')-sum('identified_downloads'))],
  ['更新成功次数',String(success)],['更新失败次数',String(failures.length)],['设备异常次数',String(incidents.length)]];
  for(const [key,value] of rows){const row=document.createElement('tr');cell(row,key);const td=cell(row,value);td.style.whiteSpace='normal';td.style.overflowWrap='anywhere';table.append(row);}
@@ -170,9 +170,11 @@ function renderDetails(data){
  for(const entry of errors)pane.append(incidentEvidence(entry,item));
  if(!errors.length){const line=document.createElement('p');line.textContent='暂无失败或设备异常记录。';pane.append(line);}
  const action=document.createElement('div');action.className='publication-controls';pane.append(action);publicationControls(action,item,data);
+ action.append(deleteFirmwareButton(item));
  controls();
 }
 function publicationControls(container,item,data){
+ if(item.deleted){container.textContent='固件包已删除';return;}
  const source=(item.id||'').startsWith('draft-')?item:data.drafts.find(x=>x.valid&&x.firmware_id===item.firmware_id);
  if(!item.valid){container.append(invalidButton());return;}
  const hwids=item.hwids||[];

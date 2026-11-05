@@ -38,6 +38,9 @@ static int database(const char *root)
         "UNIQUE(device,publication,transaction_boot,request_boot,phase,ip,mac,hostname,peer_ip,hwid));"
         "CREATE INDEX IF NOT EXISTS requests_transaction ON device_requests(device,publication,transaction_boot);";
     if (sqlite3_exec(catalog, schema, NULL, NULL, NULL) != SQLITE_OK) goto fail;
+    if (sqlite3_exec(catalog, "CREATE TABLE IF NOT EXISTS firmware_removals("
+        "path TEXT PRIMARY KEY,id TEXT NOT NULL,created INTEGER NOT NULL,requested_at INTEGER NOT NULL,"
+        "completed_at INTEGER NOT NULL DEFAULT 0,peer_ip TEXT NOT NULL)", NULL, NULL, NULL) != SQLITE_OK) goto fail;
     strcpy(catalog_path, path);
     return 0;
 fail:
@@ -100,7 +103,7 @@ static int hardware(const char *directory, const char *before, char hwids[OTA_HW
 int ota_catalog_get(const char *root, const char *directory, struct ota_catalog_identity *identity)
 {
     char before[1536], after[1536], body[512], extra;
-    if (database(root) || fingerprint(directory, before)) return -1;
+    if (database(root) || ota_catalog_removed(root, directory, NULL) || fingerprint(directory, before)) return -1;
     sqlite3_stmt *query = NULL;
     const char *sql = "SELECT version,tag,firmware_id,kernel_sha256,rootfs_sha256,uploaded_at,kernel_bytes,rootfs_bytes "
         "FROM firmware_identity WHERE path=?1 AND fingerprint=?2";
@@ -278,4 +281,74 @@ int ota_catalog_deletion(const char *root,const char *id,
     sqlite3_bind_text(q,5,status,-1,SQLITE_TRANSIENT);
     int rc=sqlite3_step(q);sqlite3_finalize(q);
     return rc==SQLITE_DONE?0:-1;
+}
+
+/* Tombstones deny every payload consumer before unlink starts. Cached identities
+ * are only exposed to audit views; normal catalog_get still requires payloads. */
+int ota_catalog_removed(const char *root, const char *path, long long *created)
+{
+    if (database(root)) return -1;
+    sqlite3_stmt *q=NULL;
+    if (sqlite3_prepare_v2(catalog,"SELECT created FROM firmware_removals WHERE path=?1",-1,&q,NULL)!=SQLITE_OK) return -1;
+    sqlite3_bind_text(q,1,path,-1,SQLITE_TRANSIENT);
+    int step=sqlite3_step(q);
+    if (step==SQLITE_ROW && created) *created=sqlite3_column_int64(q,0);
+    sqlite3_finalize(q);return step==SQLITE_ROW?1:step==SQLITE_DONE?0:-1;
+}
+int ota_catalog_recorded(const char *root,const char *path,struct ota_catalog_identity *id)
+{
+    int removed=ota_catalog_removed(root,path,NULL);
+    if (!removed) return ota_catalog_get(root,path,id);
+    if (removed<0) return -1;
+    sqlite3_stmt *q=NULL;
+    const char *sql="SELECT version,tag,firmware_id,kernel_sha256,rootfs_sha256,uploaded_at,kernel_bytes,rootfs_bytes,hwids "
+        "FROM firmware_identity JOIN firmware_hardware USING(path) WHERE path=?1";
+    if (sqlite3_prepare_v2(catalog,sql,-1,&q,NULL)!=SQLITE_OK) return -1;
+    sqlite3_bind_text(q,1,path,-1,SQLITE_TRANSIENT);int rc=-1;
+    if (sqlite3_step(q)==SQLITE_ROW) {
+        sqlite3_int64 version=sqlite3_column_int64(q,0);
+        const char *tag=(const char *)sqlite3_column_text(q,1),*hash=(const char *)sqlite3_column_text(q,2);
+        const char *kernel=(const char *)sqlite3_column_text(q,3),*rootfs=(const char *)sqlite3_column_text(q,4);
+        const char *hwids=(const char *)sqlite3_column_text(q,8);char expected[40];
+        snprintf(expected,sizeof(expected),"v%lu.%lu.%lu",(unsigned long)version>>16,((unsigned long)version>>8)&255,(unsigned long)version&255);
+        if (version>0 && version<=UINT32_MAX && tag && !strcmp(tag,expected) && hash_string(hash) &&
+            hash_string(kernel) && hash_string(rootfs) && hwids && ota_hwid_list_valid(hwids)) {
+            id->version=(unsigned long)version;id->uploaded_at=sqlite3_column_int64(q,5);
+            id->kernel_bytes=(unsigned long long)sqlite3_column_int64(q,6);id->rootfs_bytes=(unsigned long long)sqlite3_column_int64(q,7);
+            strcpy(id->tag,tag);strcpy(id->hash,hash);strcpy(id->kernel,kernel);strcpy(id->rootfs,rootfs);strcpy(id->hwids,hwids);rc=0;
+        }
+    }
+    sqlite3_finalize(q);return rc;
+}
+int ota_catalog_remove_begin(const char *root,const struct ota_removal *items,size_t count,
+                             const struct ota_catalog_identity *identity,const char *peer)
+{
+    if (database(root)||sqlite3_exec(catalog,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK) return -1;
+    sqlite3_stmt *q=NULL;int rc=-1;
+    if (sqlite3_prepare_v2(catalog,"INSERT OR IGNORE INTO firmware_removals(path,id,created,requested_at,peer_ip) VALUES(?1,?2,?3,unixepoch(),?4)",-1,&q,NULL)!=SQLITE_OK) goto done;
+    for (size_t i=0;i<count;i++) {
+        sqlite3_bind_text(q,1,items[i].path,-1,SQLITE_TRANSIENT);sqlite3_bind_text(q,2,items[i].id,-1,SQLITE_TRANSIENT);
+        sqlite3_bind_int64(q,3,items[i].created);sqlite3_bind_text(q,4,peer?peer:"unknown",-1,SQLITE_TRANSIENT);
+        if (sqlite3_step(q)!=SQLITE_DONE) goto done;
+        if (sqlite3_changes(catalog) && ota_catalog_deletion(root,items[i].id,identity,"requested")) goto done;
+        sqlite3_reset(q);sqlite3_clear_bindings(q);
+    }
+    if (sqlite3_exec(catalog,"COMMIT",NULL,NULL,NULL)==SQLITE_OK) rc=0;
+done:
+    sqlite3_finalize(q);if(rc)sqlite3_exec(catalog,"ROLLBACK",NULL,NULL,NULL);return rc;
+}
+int ota_catalog_remove_done(const char *root,const char *path)
+{
+    if(database(root)||sqlite3_exec(catalog,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK)return -1;
+    sqlite3_stmt *q=NULL;int rc=-1;
+    const char *sql="UPDATE firmware_deletions SET status='deleted',updated=unixepoch() WHERE id=(SELECT id FROM firmware_removals WHERE path=?1 AND completed_at=0)";
+    if(sqlite3_prepare_v2(catalog,sql,-1,&q,NULL)!=SQLITE_OK)goto done;
+    sqlite3_bind_text(q,1,path,-1,SQLITE_TRANSIENT);
+    if(sqlite3_step(q)!=SQLITE_DONE)goto done;
+    sqlite3_finalize(q);q=NULL;
+    if(sqlite3_prepare_v2(catalog,"UPDATE firmware_removals SET completed_at=unixepoch() WHERE path=?1 AND completed_at=0",-1,&q,NULL)!=SQLITE_OK)goto done;
+    sqlite3_bind_text(q,1,path,-1,SQLITE_TRANSIENT);
+    if(sqlite3_step(q)==SQLITE_DONE && sqlite3_exec(catalog,"COMMIT",NULL,NULL,NULL)==SQLITE_OK)rc=0;
+done:
+    sqlite3_finalize(q);if(rc)sqlite3_exec(catalog,"ROLLBACK",NULL,NULL,NULL);return rc;
 }

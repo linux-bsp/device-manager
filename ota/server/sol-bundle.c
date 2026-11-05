@@ -139,7 +139,7 @@ bool sol_bundle_route(int client,const struct server_context *context,const stru
         struct tm tm;gmtime_r(&stamp,&tm);char date[40],filename[128];strftime(date,sizeof(date),"%Y-%m-%d_%H-%M-%S+0800",&tm);
         snprintf(filename,sizeof(filename),"%s_boot-%.8s.tar.gz",date,boot);
         struct dm_transfer_serve serve={.socket=client,.fd=fd,.size=size,.range=request->range,.content_type="application/gzip",.filename=filename};
-        server_download(&serve,NULL,0,NULL,0,context->response_deferred);close(fd);return true;
+        server_download(&serve,NULL,0,NULL,0,context->response_deferred,NULL);close(fd);return true;
     }
     if(sscanf(request->path,"/api/sol/bundles/%63[^/]/%63[^/]/%64[^/]/%llu/%llu/%31[^/]%c",device,boot,sha,&size,&order,action,&extra)!=6||!safe(device)||!safe(boot)||!strcmp(device,"viewer")||!digest_valid(sha)||!size||size>BUNDLE_MAX||!order||order>0x7fffffffffffffffULL)goto invalid;
     snprintf(canonical,sizeof(canonical),"/api/sol/bundles/%s/%s/%s/%llu/%llu/%s",device,boot,sha,size,order,action);

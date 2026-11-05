@@ -330,16 +330,21 @@ static int list_entries(FILE *f, const char *root, int draft, unsigned long long
         if (ota_path(directory, base, entry->d_name) || !regular_directory(directory) ||
             ota_path(path, directory, "manifest") || ota_read(path, &r))
             continue;
+        long long created=0;
+        int removed=ota_catalog_removed(root,directory,&created);
+        if(removed<0){closedir(dir);return -1;}
+        if(draft && removed)continue;
         if (++count > 512) {
             closedir(dir);
             return -1;
         }
-        if (ota_catalog_get(root, directory, &identity)) { closedir(dir); return -1; }
+        if (ota_catalog_recorded(root, directory, &identity)) { closedir(dir); return -1; }
         struct stat st;
         if (stat(directory, &st)) {
             closedir(dir);
             return -1;
         }
+        if(!removed)created=st.st_mtime;
         unsigned long long published = draft ? 0 : number;
         int is_active = !draft && ota_channel_active(root, &r);
         if (draft) {
@@ -358,10 +363,10 @@ static int list_entries(FILE *f, const char *root, int draft, unsigned long long
         if (count > 1)
             fputc(',', f);
         fprintf(f, "{\"id\":\"%s\",\"hwid\":\"%s\","
-            "\"firmware_version\":\"%s\",\"publication\":%llu,\"bytes\":%llu,\"created\":%lld,\"quarantined\":%s,\"tag\":\"v%s\",\"firmware_id\":\"%s\",\"uploaded_at\":%lld,\"valid\":%s,\"published\":%s,\"hwids\":[",
+            "\"firmware_version\":\"%s\",\"publication\":%llu,\"bytes\":%llu,\"created\":%lld,\"quarantined\":%s,\"tag\":\"v%s\",\"firmware_id\":\"%s\",\"uploaded_at\":%lld,\"valid\":%s,\"published\":%s,\"deleted\":%s,\"hwids\":[",
             entry->d_name, r.hwid, identity.tag + 1, published,
-            r.size[0] + r.size[1] + r.size[2], (long long)st.st_mtime, blocked ? "true" : "false", identity.tag + 1, identity.hash, identity.uploaded_at,
-            blocked ? "false" : "true", is_active && !blocked ? "true" : "false");
+            r.size[0] + r.size[1] + r.size[2], created, blocked ? "true" : "false", identity.tag + 1, identity.hash, identity.uploaded_at,
+            blocked || removed ? "false" : "true", is_active && !blocked && !removed ? "true" : "false",removed?"true":"false");
         for (size_t offset = 0; offset < strlen(identity.hwids); offset += 17)
             fprintf(f, "%s\"%.16s\"", offset ? "," : "", identity.hwids + offset);
         fputs("]}", f);
@@ -410,6 +415,8 @@ int ota_admin_publish(const char *root, const char *id, unsigned long long *numb
     if (!draft_id(id)) return 404;
     char drafts[OTA_PATH], source[OTA_PATH];
     if (ota_path(drafts, root, "drafts") || ota_path(source, drafts, id) || !regular_directory(source)) return 404;
+    int removed=ota_catalog_removed(root,source,NULL);
+    if(removed)return removed>0?410:503;
     struct release r; unsigned long version;
     char hwids[OTA_HWIDS_SIZE];
     if (ota_inspect(source, &r, &version) || ota_fit_hwids(source, hwids)) return 422;
@@ -448,6 +455,8 @@ int ota_admin_bundle(const char *root, const char *kind, const char *id,
         (strcmp(kind, "draft") && strcmp(kind, "release"))) return -ENOENT;
     if (ota_path(base, root, !strcmp(kind, "draft") ? "drafts" : "releases") ||
         ota_path(directory, base, id) || !regular_directory(directory)) return -ENOENT;
+    int removed=ota_catalog_removed(root,directory,NULL);
+    if(removed)return removed>0?-ENOENT:-EIO;
     struct release release; struct ota_catalog_identity identity; char manifest[OTA_PATH];
     if (ota_path(manifest, directory, "manifest") || ota_read(manifest, &release) ||
         ota_verify(directory, &release) || ota_catalog_get(root, directory, &identity)) return -EIO;

@@ -154,7 +154,7 @@ void server_route_request(int client, const struct server_context *context, stru
             return;
         }
         int status = !length && sscanf(path + 14, "%63[^/]%c", id, &extra) == 1 ?
-            ota_admin_delete(context->directory, id) : 400;
+            ota_admin_delete(context->directory, id, network.peer_ip) : 400;
         http_json(client, status, status == 200 ? "OK" : "Delete Failed",
             status == 200 ? "{\"status\":\"deleted\"}" :
             status == 409 ? "{\"error\":\"当前发布或正在升级的固件不能删除，或其他发布任务正在操作。\"}" :
@@ -231,7 +231,11 @@ void server_route_request(int client, const struct server_context *context, stru
         struct dm_transfer_serve serve = {.socket=client,.fd=bundle,.head=head,.size=bytes,
             .range=requested_range,.content_type="application/gzip",.filename=filename,
             .callbacks={.cancelled=transfer_stopped,.context=(void *)context}};
-        server_download(&serve, NULL, 0, NULL, 0, context->response_deferred);
+        char base[OTA_PATH],directory[OTA_PATH];
+        if(ota_path(base,context->directory,!strcmp(kind,"draft")?"drafts":"releases")||ota_path(directory,base,id)){
+            close(bundle);http_text(client,503,"Unavailable","Invalid export context\n",head);return;
+        }
+        server_download(&serve, context->directory, 0, NULL, 0, context->response_deferred, directory);
         close(bundle); return;
     }
     if (!strcmp(path, "/") || !strcmp(path, "/firmware")) {
@@ -330,6 +334,8 @@ void server_route_request(int client, const struct server_context *context, stru
             ota_read(manifest, &release) || strcmp(release.hwid, hwid)) {
             http_text(client, 403, "Forbidden", "Firmware does not target this HWID\n", head); close(artifact_root); return;
         }
+        int removed=ota_catalog_removed(context->directory,directory,NULL);
+        if(removed){http_text(client,removed>0?410:503,"Unavailable","Firmware package deleted\n",head);close(artifact_root);return;}
     }
     if (name && !strcmp(name, "version") && artifact_root >= 0) {
         char directory[OTA_PATH], relative[128], body[160]; struct ota_catalog_identity identity;
@@ -402,6 +408,6 @@ void server_route_request(int client, const struct server_context *context, stru
     unsigned long long publication = 0;
     if (sscanf(path, "/releases/%llu/", &publication) != 1) publication = 0;
     server_download(&serve, context->directory, publication, download_device,
-                    publication && !strcmp(name, "rootfs.itb"), context->response_deferred);
+                    publication && !strcmp(name, "rootfs.itb"), context->response_deferred, NULL);
     close(fd);
 }

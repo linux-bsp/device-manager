@@ -35,7 +35,14 @@ struct ota_catalog_identity {
     char tag[40], hash[65], kernel[65], rootfs[65];
     char hwids[OTA_HWIDS_SIZE];
 };
-int ota_admin_delete(const char *root, const char *id);
+struct ota_removal { char path[OTA_PATH], id[32]; long long created; };
+int ota_admin_delete(const char *root, const char *id, const char *peer);
+int ota_admin_cleanup(const char *root);
+int ota_catalog_removed(const char *root, const char *path, long long *created);
+int ota_catalog_recorded(const char *root, const char *path, struct ota_catalog_identity *identity);
+int ota_catalog_remove_begin(const char *root, const struct ota_removal *items, size_t count,
+                             const struct ota_catalog_identity *identity, const char *peer);
+int ota_catalog_remove_done(const char *root, const char *path);
 int ota_catalog_deletion(const char *root, const char *id, const struct ota_catalog_identity *identity, const char *status);
 int ota_catalog_download(const char *root, unsigned long long publication, const char *device);
 int ota_catalog_downloads_json(const char *root, FILE *out);

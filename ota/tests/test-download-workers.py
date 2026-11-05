@@ -97,6 +97,18 @@ class Downloads(unittest.TestCase):
         self.assertLess(time.monotonic()-started,2)
         self.assertFalse((Path('/proc')/child).exists())
 
+    def test_deletion_cancels_payload_and_manual_export_workers(self):
+        old=self.draft();self.publish(old)
+        newer=self.draft(self.bundle(admin.AdminHTTP.fixture(self,65538)));self.publish(newer)
+        for path in ('/releases/1/rootfs.itb','/api/download/release/1','/api/download/draft/'+old):
+            self.assertEqual(self.slow(path).status,200)
+        self.wait(lambda:len(self.children())==3)
+        self.assertEqual(self.request('DELETE','/api/firmware/'+old,headers={'X-OTA-Request':'1'})[0],200)
+        self.wait(lambda:not self.children())
+        self.assertEqual(self.download_count(),0)
+        self.assertFalse((self.feed/'releases/1/rootfs.itb').exists())
+        self.assertEqual(self.request('GET','/api/download/release/1')[0],404)
+
     def test_transport_deadline_does_not_count_incomplete_download(self):
         self.setup_release()
         self.server.terminate(); self.server.wait(timeout=3)
