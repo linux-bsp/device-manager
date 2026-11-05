@@ -2,11 +2,13 @@
 let solDeleting=false;
 function solRecordProtected(row){
  if(row.incident)return true;
+ if(row.bundleOnly)return false;
  const meta=solDecode(row.meta||'');
  const latest=Math.max(0,...sol.rows.filter(r=>r.device===row.device&&!SolNames.archived(r)).map(r=>r.order));
  return !SolNames.archived(row)&&(meta.split('\n').includes('current=yes')||(!meta&&row.order===latest));
 }
 function solRecordOptions(){
+ solBundleButton();
  const device=$('sol-device').value,selected=$('sol-boot').value;
  const rows=sol.rows.filter(row=>row.device===device),list=$('sol-boot-options');list.replaceChildren();
  const current=rows.find(row=>row.boot===selected);

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -14,6 +15,7 @@ int log_retention_record(const char *root, const char *boot, const char *reason,
     int dir = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (dir < 0) return -1;
     int fd = -1, rc = -1;
+    if (flock(dir, LOCK_EX | LOCK_NB)) { int error = errno; close(dir); errno = error; return -1; }
     struct stat st;
     if (!fstatat(dir, ".retention.log", &st, AT_SYMLINK_NOFOLLOW)) {
         if (!S_ISREG(st.st_mode) || st.st_nlink != 1) { errno = EINVAL; goto out; }

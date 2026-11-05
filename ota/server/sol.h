@@ -2,6 +2,7 @@
 #define DEVICE_SOL_H
 #include <stdbool.h>
 #include <stddef.h>
+#include <sqlite3.h>
 /* Return HTTP status and an allocated JSON/text response. No shell execution. */
 int sol_request(const char *root, const char *method, const char *path,
                 const char *authorization, const char *peer, const char *body,
@@ -10,6 +11,8 @@ struct ota_report;
 int sol_ota_event(const char *root, const struct ota_report *report, const char *observed_boot);
 int sol_enroll(int argc, char **argv);
 bool sol_access(const char *root, const char *device, const char *authorization);
+bool sol_view_access(const char *root, const char *authorization);
+sqlite3 *sol_storage(const char *root);
 void sol_set_open_view(bool enabled);
 void sol_set_debug_no_auth(bool enabled);
 #endif

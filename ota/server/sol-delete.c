@@ -29,7 +29,7 @@ int sol_deleted(sqlite3 *db,const char *device,const char *boot)
 int sol_delete_record(sqlite3 *db,const char *device,const char *boot,const char *peer,char **out)
 {
     if(sqlite3_exec(db,"BEGIN IMMEDIATE",NULL,NULL,NULL)!=SQLITE_OK)return reply(out,503,"{\"error\":\"日志数据库忙，请重试。\"}");
-    sqlite3_stmt *s=prepare(db,"SELECT CASE WHEN meta='' AND ord=(SELECT MAX(ord) FROM boots WHERE device=?1) THEN 'uploading' ELSE meta END FROM boots WHERE device=?1 AND boot=?2 UNION ALL SELECT CASE WHEN committed=0 THEN 'uploading' ELSE 'archive' END FROM startup_boots WHERE device=?1 AND boot=?2",device,boot);
+    sqlite3_stmt *s=prepare(db,"SELECT CASE WHEN meta='' AND ord=(SELECT MAX(ord) FROM boots WHERE device=?1) THEN 'uploading' ELSE meta END FROM boots WHERE device=?1 AND boot=?2 UNION ALL SELECT CASE WHEN committed=0 THEN 'uploading' ELSE 'archive' END FROM startup_boots WHERE device=?1 AND boot=?2 UNION ALL SELECT CASE WHEN committed=0 THEN 'uploading' ELSE 'archive' END FROM bundles WHERE device=?1 AND boot=?2 AND committed>=0",device,boot);
     if(!s)goto fail;
     int step,found=0,protected=0;
     while((step=sqlite3_step(s))==SQLITE_ROW){
@@ -40,13 +40,14 @@ int sol_delete_record(sqlite3 *db,const char *device,const char *boot,const char
     if(protected){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);return reply(out,409,"{\"error\":\"正在采集或上传的启动记录不能删除。\"}");}
     int deleted=sol_deleted(db,device,boot);if(deleted<0)goto fail;
     if(!found&&!deleted){sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);return reply(out,404,"{\"error\":\"启动记录不存在。\"}");}
-    s=prepare(db,"INSERT OR IGNORE INTO sol_deleted VALUES(?1,?2,?3,?4,(SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM chunks WHERE device=?1 AND boot=?2)+(SELECT COALESCE(SUM(length(data)),0) FROM startup_streams WHERE device=?1 AND boot=?2))",device,boot);
+    s=prepare(db,"INSERT OR IGNORE INTO sol_deleted VALUES(?1,?2,?3,?4,(SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM chunks WHERE device=?1 AND boot=?2)+(SELECT COALESCE(SUM(length(data)),0) FROM startup_streams WHERE device=?1 AND boot=?2)+(SELECT COALESCE(SUM(size),0) FROM bundles WHERE device=?1 AND boot=?2 AND committed>=0))",device,boot);
     if(!s)goto fail;
     sqlite3_bind_int64(s,3,time(NULL));sqlite3_bind_text(s,4,peer,-1,SQLITE_TRANSIENT);if(done(s))goto fail;
     if(done(prepare(db,"INSERT OR IGNORE INTO sol_deleted_streams SELECT device,boot,stage,gen,pos FROM streams WHERE device=?1 AND boot=?2",device,boot))||
        done(prepare(db,"INSERT OR IGNORE INTO sol_deleted_streams SELECT device,boot,stage,0,length(data) FROM startup_streams WHERE device=?1 AND boot=?2",device,boot))||
        done(prepare(db,"DELETE FROM boots WHERE device=?1 AND boot=?2",device,boot))||
-       done(prepare(db,"DELETE FROM startup_boots WHERE device=?1 AND boot=?2",device,boot)))goto fail;
+       done(prepare(db,"DELETE FROM startup_boots WHERE device=?1 AND boot=?2",device,boot))||
+       done(prepare(db,"UPDATE bundles SET committed=-1 WHERE device=?1 AND boot=?2",device,boot)))goto fail;
     if(sqlite3_exec(db,"COMMIT",NULL,NULL,NULL)!=SQLITE_OK)goto fail;
     return reply(out,200,"{\"deleted\":true}");
 fail:sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);return reply(out,503,"{\"error\":\"删除未完成，请重试。\"}");

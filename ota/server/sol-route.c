@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "sol-route.h"
 #include "sol.h"
+#include "sol-bundle.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@ bool sol_route_client(int client, const struct server_context *context,
 {
     if (strncmp(request->path, "/api/sol/", 9))
         return false;
+    if(sol_bundle_route(client,context,request))return true;
 
     bool deleting=!strncmp(request->path,"/api/sol/records/",17);
     if(deleting){
@@ -38,6 +40,9 @@ bool sol_route_client(int client, const struct server_context *context,
     body[received] = '\0';
     int status = sol_request(context->directory, request->method, request->path,
                              request->authorization, request->peer_ip, body, received, &response);
+    if(deleting&&status==200&&sol_bundle_cleanup(context,request->path)){
+        free(response);response=strdup("{\"error\":\"Archive body cleanup pending; retry deletion\"}");status=503;
+    }
     http_json(client, status, status == 200 ? "OK" : "SOL Request Failed",
               response ? response : "{}", request->head);
     free(response);

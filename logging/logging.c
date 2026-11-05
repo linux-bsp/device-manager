@@ -274,6 +274,7 @@ static void prune(void)
 {
     struct boot list[256];size_t n=boots(list,256),remaining=n;
     uint64_t sizes[256]={0},total=0;
+    int archived[256]={0};
     for(size_t i=0;i<n;i++) {
         char dir[PATH_CAP],path[PATH_CAP];join(dir,root,list[i].name);
         DIR *d=opendir(dir);if(!d)continue;
@@ -284,19 +285,20 @@ static void prune(void)
             if(!lstat(path,&st)&&S_ISREG(st.st_mode))sizes[i]+=(uint64_t)st.st_size;
         }
         closedir(d);total+=sizes[i];
+        archived[i]=log_archive_receipted(root,list[i].name);
     }
-    for(size_t index=n;index>0;index--) {
+    for(int pass=1;pass>=0;pass--) for(size_t index=n;index>0;index--) {
         size_t i=index-1;
-        if(!strcmp(list[i].name,current))continue;
+        if(!strcmp(list[i].name,current)||archived[i]!=pass)continue;
         if(remaining<=LOG_KEEP_BOOTS&&total<=total_limit)break;
         char dir[PATH_CAP],p[PATH_CAP];join(dir,root,list[i].name);DIR *d=opendir(dir);if(!d)continue;
-        const char *reason=remaining>LOG_KEEP_BOOTS?"boot-limit":"capacity-limit";
+        const char *reason=archived[i]?"archived-retention":remaining>LOG_KEEP_BOOTS?"boot-limit":"capacity-limit";
         if(log_retention_record(root,list[i].name,reason,"all",0,sizes[i])) {
             int error=errno;closedir(d);storage_error(error);continue;
         }
-        char notice[256];snprintf(notice,sizeof(notice),"log retention: reason=%s boot=%.63s bytes=%llu; archive confirmation unavailable\n",reason,list[i].name,(unsigned long long)sizes[i]);event(notice);
+        char notice[256];snprintf(notice,sizeof(notice),"log retention: reason=%s boot=%.63s bytes=%llu; archive=%s\n",reason,list[i].name,(unsigned long long)sizes[i],archived[i]?"confirmed":"unconfirmed");event(notice);
         struct dirent *de;while((de=readdir(d))) {
-            if(de->d_name[0]=='.')continue;
+            if(!strcmp(de->d_name,".")||!strcmp(de->d_name,".."))continue;
             join(p,dir,de->d_name);struct stat st;
             if(!lstat(p,&st)&&S_ISREG(st.st_mode)&&unlink(p))storage_error(errno);
         }
@@ -484,7 +486,10 @@ static int cli_main(int argc,char **argv)
     if(argc==2&&!strcmp(argv[1],"status")){
         struct statfs fs;char state[64];const char *mode=statfs(root,&fs)?"unavailable":fs.f_type==0x01021994||fs.f_type==0x858458f6?"volatile":"persistent";
         if(small_read("/run/device-manager/storage-state",state,sizeof(state)))snprintf(state,sizeof(state),"unknown");
-        printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream; 64 MiB total\narchive-ack=not-tracked\n",current,mode,state,bootpath,LOG_KEEP_BOOTS);
+        printf("boot=%s\nstorage=%s\ndata-state=%s\npath=%s\nretention=%d boots; 2 x 2 MiB per stream; 64 MiB total\n",current,mode,state,bootpath,LOG_KEEP_BOOTS);
+        size_t acknowledged=0,closed=0;
+        for(size_t i=0;i<n;i++)if(strcmp(list[i].name,current)){closed++;if(log_archive_receipted(root,list[i].name))acknowledged++;}
+        printf("archive-ack=%zu\narchive-pending=%zu\n",acknowledged,closed-acknowledged);
         char status[PATH_CAP];join(status,runtime,"sync-status");
         if(access(status,F_OK))puts("sync-state=unknown");else if(show_file(status))return 1;
         join(status,runtime,"clock-status");if(!access(status,R_OK)&&show_file(status))return 1;

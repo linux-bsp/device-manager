@@ -12,7 +12,7 @@ AGENT_HEADERS = $(wildcard agent/*.h shared/*.h)
 .PHONY: all test clean
 all: device-server fwctld ota-cli
 
-ota-page.h: web/time-format.js web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py ../config/hwid-registry.json ../identity/registry.py
+ota-page.h: web/time-format.js web/index.html web/styles.css web/app.js web/hwid.js web/fleet.js web/sol-console.js web/sol-names.js web/sol-bundles.js web/clock.js web/sol-records.js web/incident-logs.js web/embed.py ../config/hwid-registry.json ../identity/registry.py
 	python3 web/embed.py $@
 
 device-server: $(SERVER_SOURCES) $(SERVER_HEADERS) ota-page.h $(DM_TRANSFER_SERVER)
@@ -44,6 +44,7 @@ test: all
 	python3 ./tests/test-log-stop.py
 	python3 ./tests/test-cli.py
 	python3 ./tests/test-sol.py
+	python3 ./tests/test-sol-bundle.py
 	python3 ./tests/test-sol-delete.py
 	python3 ./tests/test-startup.py
 	python3 ./tests/test-manager-time.py

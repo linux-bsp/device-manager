@@ -14,6 +14,7 @@ const SolNames = {
     archived(row) { return /(?:^|\n)startup=/.test(row?.meta || ''); },
     short(row) { return (row?.boot || 'unknown').replace(/[^a-z0-9_-]/gi, '').slice(0, 8) || 'unknown'; },
     label(row) {
+        if (row.bundleOnly) return `${this.stamp(row.bundle.received)?.label || '接收时间未知'} · 完整日志包 · ${this.short(row)}`;
         if (!this.archived(row)) return row.boot + ((row.meta || '').includes('current=yes') ? '（当前）' : '');
         const time = this.stamp(row.archive_received_at ?? row.seen);
         const kind = (row.meta || '').includes('startup=healthy-current') ? '正常启动' : '上次未确认启动';

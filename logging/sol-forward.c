@@ -1,6 +1,7 @@
 /* Independent retrying uploader: local collection never waits for the network. */
 #define _GNU_SOURCE
 #include "sol-forward.h"
+#include "bundle-forward.h"
 #include "startup-forward.h"
 #include "time-sync.h"
 #include "time-control.h"
@@ -75,8 +76,10 @@ static int post_url(const char *url,const char *data,size_t length,long long *ne
     request.connect_timeout_ms=2000;request.timeout_ms=5000;request.callbacks.cancelled=transfer_cancelled;
     int rc=dm_transfer_perform(&request,&response);
     if(rc)return rc;
+    if(response.http_status==410)return -ESTALE;
+    if(response.http_status==409&&strstr(url,"/api/sol/bundles/")&&strstr(body,"Archive identity conflict"))return -ESTALE;
     if((response.http_status!=200&&response.http_status!=409)||
-       sscanf(body,"{\"next\":%lld}%c",next,&extra)!=1||*next<0||*next>4*1024*1024)return -EPROTO;
+       sscanf(body,"{\"next\":%lld}%c",next,&extra)!=1||*next<0||*next>32*1024*1024)return -EPROTO;
     return 0;
 }
 static int post_path(const char *path,const char *data,size_t length,long long *next)
@@ -179,6 +182,7 @@ int sol_forward(const char *root)
         int startup=startup_forward(device,post_path);
         int result=cycle(root)<0?-1:0;
         if(startup)result=-1;
+        if(!stopped && bundle_forward(root,server,device,post_path,transfer_cancelled)<0)result=-1;
         if(result!=state){fprintf(stderr,"[logctld] [%s] SOL %s\n",result?"WARN":"INFO",result?"unavailable; local collection continues, retrying":"connected; log forwarding active");state=result;}
         for(int i=0;i<20&&!stopped;i++)usleep(250000);
     }
