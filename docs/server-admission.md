@@ -94,6 +94,32 @@ continue validating full SHA256 after download and on-device partition writes.
 Tests count FIT tool invocations across repeated requests and server restart,
 and verify live quarantine and corruption detection with preserved mtime.
 
+## Ready request scheduling (S5e)
+
+Each turn collects one bounded header step from each pending client, then
+dispatches the finite set of complete requests in three classes:
+
+- Device control: health, time synchronization, latest firmware selection,
+  policy, device transactions/results and release identity/manifest metadata.
+- Other management queries and SOL operations.
+- Firmware uploads, manual bundle exports and firmware payload downloads.
+
+Within each class the connection order rotates. Each ready request gets one
+dispatch in that turn; newly arriving high-priority requests are considered on
+the next turn, so they cannot continuously displace already-ready bulk work.
+The same connection limits and header deadlines apply to all classes.
+
+This is non-preemptive scheduling. A handler already executing, a slow small
+request body, completed upload validation or storage IO can delay all classes.
+Priority is based on endpoint purpose, not authenticated device trust, and does
+not reserve capacity against a client intentionally flooding control endpoints.
+It is not a real-time or denial-of-service availability guarantee.
+
+`test-scheduling.py` queues complete control/management requests together with
+exports whose tar subprocess waits on a test gate. Control responses must arrive
+before opening that gate; afterwards every queued export must finish. Fixture
+SIGSTOP/SIGCONT is limited to an isolated test server, never production.
+
 Next phase: control-request priority,
 global/per-device resource accounting, and explicit transactional ownership across
 publication, quarantine, SOL deletion and archive receipt operations. Long-running

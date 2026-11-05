@@ -18,11 +18,12 @@
 #define PEER_CLIENTS 16
 #define HEADER_MS 15000
 struct pending {
-    int fd, draining;
+    int fd, draining, ready;
     uint32_t peer;
     int64_t started;
     size_t used;
     char header[sizeof(((struct dm_transfer_http_request *)0)->storage)];
+    struct http_request request;
 };
 
 static int64_t now_ms(void)
@@ -62,6 +63,32 @@ static void accept_some(int listener, struct pending *clients)
     }
 }
 
+static int request_priority(const struct http_request *request)
+{
+    const char *path = request->path;
+    if (!strcmp(path, "/healthz") || !strncmp(path, "/api/time/", 10) ||
+        !strncmp(path, "/api/devices/", 13) || !strncmp(path, "/api/policy/", 12) ||
+        !strncmp(path, "/latest/", 8)) return 0;
+    const char *name = strrchr(path, '/');
+    if (!strncmp(path, "/releases/", 10) && name &&
+        (!strcmp(name, "/manifest") || !strcmp(name, "/version") ||
+         !strcmp(name, "/identity") || !strcmp(name, "/info"))) return 0;
+    if (!strcmp(path, "/api/upload") || !strncmp(path, "/api/download/", 14) ||
+        !strncmp(path, "/releases/", 10)) return 2;
+    return 1;
+}
+
+static void response_done(struct pending *client, int deferred, int result)
+{
+    client->ready = 0;
+    if (deferred || result < 0) { close(client->fd); client->fd = -1; }
+    else {
+        /* Deliver the response before bounded, nonblocking body draining. */
+        (void)shutdown(client->fd, SHUT_WR);
+        client->draining = 1; client->used = 0; client->started = now_ms();
+    }
+}
+
 int server_accept_loop(int listener, const struct server_context *context)
 {
     int flags = fcntl(listener, F_GETFL);
@@ -93,8 +120,9 @@ int server_accept_loop(int listener, const struct server_context *context)
         if (ready < 0) { result = -errno; break; }
         if (!*context->running) break;
         if (events[0].revents & (POLLERR | POLLHUP | POLLNVAL)) { result = -EIO; break; }
-        /* Rotate service order. One bounded header step per connection per
-         * turn; there are no threads and no concurrent database mutations. */
+        /* Collect one bounded header step per connection before dispatching.
+         * A bulk request encountered first must not jump ahead of a complete
+         * device control request from the same turn. */
         for (int count = 0; count < CLIENTS && *context->running; count++) {
             int i = (cursor + count) % CLIENTS;
             struct pending *p = &clients[i];
@@ -112,26 +140,30 @@ int server_accept_loop(int listener, const struct server_context *context)
             int rc = now < 0 || now - p->started >= HEADER_MS ? 408 :
                 dm_transfer_http_header_step(p->fd, p->header, sizeof(p->header), &p->used);
             if (!rc) continue;
-            int deferred = 0;
             if (rc == 1) {
-                struct http_request request;
-                rc = http_parse_request(p->fd, &request, p->header, p->used);
-                if (!rc) {
+                rc = http_parse_request(p->fd, &p->request, p->header, p->used);
+                if (!rc) { p->ready = 1; continue; }
+            }
+            if (rc > 0) reject(p->fd, rc);
+            response_done(p, 0, rc);
+        }
+        /* Finite snapshot: each ready client runs once, rotating within its
+         * class. Newly arriving controls wait for the next turn, so they cannot
+         * indefinitely starve a ready bulk operation. Handlers are serialized
+         * and non-preemptive; this does not bound a handler's storage latency. */
+        for (int priority = 0; priority < 3 && *context->running; priority++) {
+            for (int count = 0; count < CLIENTS && *context->running; count++) {
+                struct pending *p = &clients[(cursor + count) % CLIENTS];
+                if (p->fd >= 0 && p->ready && request_priority(&p->request) == priority) {
+                    int deferred = 0;
                     server_uploads_poll();
                     server_downloads_poll();
                     struct server_context owned = *context;
                     owned.response_deferred = &deferred;
-                    server_route_request(p->fd, &owned, &request);
+                    server_route_request(p->fd, &owned, &p->request);
                     server_downloads_poll();
+                    response_done(p, deferred, 0);
                 }
-            }
-            if (rc > 0) reject(p->fd, rc);
-            if (deferred || rc < 0) { close(p->fd); p->fd = -1; }
-            else {
-                /* Deliver a final response before discarding a rejected body's
-                 * remaining bytes; never block other clients on lingering IO. */
-                (void)shutdown(p->fd, SHUT_WR);
-                p->draining = 1; p->used = 0; p->started = now_ms();
             }
         }
         if (events[0].revents & POLLIN) accept_some(listener, clients);
